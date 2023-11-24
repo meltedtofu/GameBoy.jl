@@ -1,0 +1,18 @@
+#!/bin/bash
+
+case $1 in
+  docs)
+    pushd docs
+    julia --color=yes --depwarn=no --project=@. --startup-file=no -q -t2 make.jl
+    popd
+    ;;
+  servedocs)
+    pushd docs
+    julia --color=yes --depwarn=no --project=@. --startup-file=no -q -t2 -e 'using GameBoy, LiveServer; servedocs(;foldername=".", launch_browser=true)'
+    popd
+    ;;
+  *)
+    echo "unknown subcommand $1"
+    exit 1
+    ;;
+esac

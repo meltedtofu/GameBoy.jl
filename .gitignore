@@ -1,2 +1,3 @@
 deps/emulator/lib*
 *.log
+docs/build
