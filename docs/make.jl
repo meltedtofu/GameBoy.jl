@@ -39,3 +39,7 @@ makedocs(sitename = "GameBoy.jl",
              "Overview" => "index.md",
              "code.md",
          ])
+
+if "DOCUMENTER_KEY" in keys(ENV)
+    deploydocs( repo = "github.com/meltedtofu/GameBoy.jl.git")
+end
