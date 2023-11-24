@@ -1,0 +1,4 @@
+name = "GameBoy"
+uuid = "6fb4242f-1e24-4c34-aea5-7820002b36ca"
+authors = ["Melted Tofu <melted@meltedtofu.com>"]
+version = "0.1.0"
