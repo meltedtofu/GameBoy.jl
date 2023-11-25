@@ -78,7 +78,7 @@ enum IORegisters {
 };
 static uint8_t const IOUnusedBits[128] = {
     [IO_Joypad] = 0xC0,
-    // ... 
+    // ...
 };
 static void clock_countChange(struct Gameboy* gb, uint16_t new_value);
 static uint8_t mmu_read(struct Gameboy*, int);
@@ -96,7 +96,7 @@ void clock_increment(struct Gameboy* gb)
         /* Delayed overflow effects */
         gb->mem.IO[IO_InterruptFlag] |= Interrupt_TIMA;
         gb->clock.TimerOverflow = false;
-    
+
         /* In the next machine cycle the modulo is being loaded */
         gb->mem.IO[IO_TimerCounter] = gb->mem.IO[IO_TimerModulo];
         gb->clock.TimerLoading = true;
@@ -482,7 +482,7 @@ void cpu_step(struct Gameboy* gb)
     case 0x44: gb->cpu.B = gb->cpu.H; break;
     case 0x45: gb->cpu.B = gb->cpu.L; break;
     case 0x47: gb->cpu.B = gb->cpu.A; break;
-    
+
     // ld $c, $reg8
     case 0x48: gb->cpu.C = gb->cpu.B; break;
     case 0x49: gb->cpu.C = gb->cpu.C; break;
@@ -491,7 +491,7 @@ void cpu_step(struct Gameboy* gb)
     case 0x4C: gb->cpu.C = gb->cpu.H; break;
     case 0x4D: gb->cpu.C = gb->cpu.L; break;
     case 0x4F: gb->cpu.C = gb->cpu.A; break;
-    
+
     // ld $d, $reg8
     case 0x50: gb->cpu.D = gb->cpu.B; break;
     case 0x51: gb->cpu.D = gb->cpu.C; break;
@@ -500,7 +500,7 @@ void cpu_step(struct Gameboy* gb)
     case 0x54: gb->cpu.D = gb->cpu.H; break;
     case 0x55: gb->cpu.D = gb->cpu.L; break;
     case 0x57: gb->cpu.D = gb->cpu.A; break;
-    
+
     // ld $e, $reg8
     case 0x58: gb->cpu.E = gb->cpu.B; break;
     case 0x59: gb->cpu.E = gb->cpu.C; break;
@@ -509,7 +509,7 @@ void cpu_step(struct Gameboy* gb)
     case 0x5C: gb->cpu.E = gb->cpu.H; break;
     case 0x5D: gb->cpu.E = gb->cpu.L; break;
     case 0x5F: gb->cpu.E = gb->cpu.A; break;
-    
+
     // ld $h, $reg8
     case 0x60: gb->cpu.H = gb->cpu.B; break;
     case 0x61: gb->cpu.H = gb->cpu.C; break;
@@ -518,7 +518,7 @@ void cpu_step(struct Gameboy* gb)
     case 0x64: gb->cpu.H = gb->cpu.H; break;
     case 0x65: gb->cpu.H = gb->cpu.L; break;
     case 0x67: gb->cpu.H = gb->cpu.A; break;
-    
+
     // ld $l, $reg8
     case 0x68: gb->cpu.L = gb->cpu.B; break;
     case 0x69: gb->cpu.L = gb->cpu.C; break;
@@ -527,7 +527,7 @@ void cpu_step(struct Gameboy* gb)
     case 0x6C: gb->cpu.L = gb->cpu.H; break;
     case 0x6D: gb->cpu.L = gb->cpu.L; break;
     case 0x6F: gb->cpu.L = gb->cpu.A; break;
-    
+
     // ld $a, $reg8
     case 0x78: gb->cpu.A = gb->cpu.B; break;
     case 0x79: gb->cpu.A = gb->cpu.C; break;
@@ -544,7 +544,7 @@ void cpu_step(struct Gameboy* gb)
     case 0x66: gb->cpu.H = mmu_read(gb, ReadHL(gb)); break;
     case 0x6E: gb->cpu.L = mmu_read(gb, ReadHL(gb)); break;
     case 0x7E: gb->cpu.A = mmu_read(gb, ReadHL(gb)); break;
-    
+
     // ld ($hl), $reg8
     case 0x70: mmu_write(gb, ReadHL(gb), gb->cpu.B); break;
     case 0x71: mmu_write(gb, ReadHL(gb), gb->cpu.C); break;
@@ -557,7 +557,7 @@ void cpu_step(struct Gameboy* gb)
     // ld $a, ($reg16)
     case 0x0A: gb->cpu.A = mmu_read(gb, ReadBC(gb)); break;
     case 0x1A: gb->cpu.A = mmu_read(gb, ReadDE(gb)); break;
-    
+
     // ld ($reg16), $a
     case 0x02: mmu_write(gb, ReadBC(gb), gb->cpu.A); break;
     case 0x12: mmu_write(gb, ReadDE(gb), gb->cpu.A); break;
@@ -616,7 +616,7 @@ void cpu_step(struct Gameboy* gb)
     case 0xD1: WriteDE(gb, Pop16(gb)); break;
     case 0xE1: WriteHL(gb, Pop16(gb)); break;
     case 0xF1: WriteAF(gb, Pop16(gb)); break;
-    
+
     // push $reg16
     case 0xC5:
         clock_increment(gb);
@@ -732,12 +732,12 @@ void cpu_step(struct Gameboy* gb)
     case 0xAC: BitXor(gb, gb->cpu.H); break;
     case 0xAD: BitXor(gb, gb->cpu.L); break;
     case 0xAF: BitXor(gb, gb->cpu.A); break;
-    
+
     // and/or/xor $a, ($hl)
     case 0xA6: BitAnd(gb, mmu_read(gb, ReadHL(gb))); break;
     case 0xB6: BitOr(gb, mmu_read(gb, ReadHL(gb))); break;
     case 0xAE: BitXor(gb, mmu_read(gb, ReadHL(gb))); break;
-    
+
     // and/or/xor $a, imm8
     case 0xE6: BitAnd(gb, Imm8(gb)); break;
     case 0xF6: BitOr(gb, Imm8(gb)); break;
@@ -846,7 +846,7 @@ void cpu_step(struct Gameboy* gb)
     case 0xCC: CallCond(gb, Imm16(gb), ReadZ(gb)); break; // call z, imm16
     case 0xD4: CallCond(gb, Imm16(gb), !ReadC(gb)); break; // call nc, imm16
     case 0xDC: CallCond(gb, Imm16(gb), ReadC(gb)); break; // call c, imm16
-    
+
     case 0xCD: Call(gb, Imm16(gb)); break; // call imm16
     case 0xC7: Call(gb, 0x00); break; // rst 0x00
     case 0xCF: Call(gb, 0x08); break; // rst 0x08
@@ -904,7 +904,6 @@ void cpu_step(struct Gameboy* gb)
     } break;
     case 0x10: { // stop 0
         // TODO STOP
-        assert(false);
     } break;
     case 0x37: { // scf
         UpdateN(gb, false);
@@ -1553,7 +1552,7 @@ void gameboy_setButtonState(struct Gameboy* gb, int button, bool down)
         input_setUp(gb, button);
     }
 }
-char const* gameboy_load(struct Gameboy* gb)
+char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
 {
     /* Reset state */
     memset(&gb->info.Title[0], 0, sizeof(gb->info.Title));
@@ -1571,7 +1570,7 @@ char const* gameboy_load(struct Gameboy* gb)
         for(unsigned int i = 0x134; i < 0x14D; i += 1) {
             headerChecksum = headerChecksum - gb->mem.CartROM[i] - 1;
         }
-        if(headerChecksum != gb->mem.CartROM[0x14D]) {
+        if(headerChecksum != gb->mem.CartROM[0x14D] && !skipChecksum) {
             return "Header checksum incorrect";
         }
     }
@@ -1726,8 +1725,8 @@ char const* gameboy_load(struct Gameboy* gb)
         /* ROM Checksum does not include the checksum bytes */
         romChecksum -= gb->mem.CartROM[0x14E];
         romChecksum -= gb->mem.CartROM[0x14F];
-    
-        if((((uint16_t)gb->mem.CartROM[0x14E] << 8u) | gb->mem.CartROM[0x14F]) != romChecksum) {
+
+        if(!skipChecksum && (((uint16_t)gb->mem.CartROM[0x14E] << 8u) | gb->mem.CartROM[0x14F]) != romChecksum) {
             return "ROM Checksum incorrect";
         }
     }
@@ -1754,7 +1753,7 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
         gb->cpu.PC = 0x100;
     }
     gb->cpu.SP = 0xFFFE;
-    
+
     // Taken from The Cycle Accurate GB Doc
     gb->cpu.A = 0x01;
     gb->cpu.F = 0xB0;
@@ -1764,7 +1763,7 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
     gb->cpu.E = 0xD8;
     gb->cpu.H = 0x01;
     gb->cpu.L = 0x4D;
-    
+
     gb->cpu.InterruptsEnabled = false;
     gb->cpu.InterruptEnablePending = false;
     gb->cpu.Halted = false;
@@ -1787,7 +1786,7 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
     gb->mem.IO[IO_WindowX] = 0x00;
     gb->mem.IO[IO_WindowY] = 0x00;
     gb->mem.InterruptEnable = 0x00;
-    
+
     /* Initialise sound IO registers */
     //gb->mem.IO[0xFF10] = 0x80;
     //gb->mem.IO[0xFF11] = 0xBF;
@@ -1814,10 +1813,10 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
     if(gb->mem.MBCModel == Cart_MBC1_4_32) {
         gb->mem.MBCModel = Cart_MBC1_16_8;
     }
-    
+
     gb->mem.MBCROMBank = 1;
     gb->buttons.Pressed = 0;
-    
+
     gb->lcd.NewFrame = false;
     gb->dma.PendingSource = 0;
     gb->dma.DelayStart = false;

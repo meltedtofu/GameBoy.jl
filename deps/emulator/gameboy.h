@@ -100,21 +100,21 @@ struct Gameboy
         uint8_t HighRAM[127];
         /* 0xFFFF */
         uint8_t InterruptEnable;
-    
+
         /* The cartridge ROM & RAM is typically banked into the main address
          * space using a MBC chip */
         unsigned int CartROMSize;
         uint8_t CartROM[Cart_MaxROMSize];
-    
+
         unsigned int CartRAMSize;
         uint8_t CartRAM[Cart_MaxRAMSize];
-    
+
         /* If true then addresses 00-FF contain the boot ROM */
         bool BootROMEnabled;
-    
+
         /* Cartridge RAM should be enabled before writing to it, and disabled when finished */
         bool CartRAMBankEnabled;
-    
+
         /* Model and state of the MBC chip */
         int MBCModel;
         unsigned int MBCROMBank;
@@ -122,7 +122,7 @@ struct Gameboy
     } mem;
     struct {
         time_t BaseTime;
-    
+
         /* seconds, minutes, hours, days, dayhi */
         uint8_t BaseReg[5];
         uint8_t LatchedReg[5];
@@ -131,17 +131,17 @@ struct Gameboy
     struct {
         bool DelayStart;
         uint8_t PendingSource;
-    
+
         /* Source for currently running DMA (0 if not active) */
         uint16_t Source;
-    
+
         /* If OAM DMA is active on current cycle */
         bool Active;
     } dma;
     struct {
         /* Machine cycles through current frame */
         unsigned int FrameProgress;
-    
+
         /* Bits 0-1 = colour (0 = darkest, 3 = lightest)
          * Other bits currently all zero.
          */
@@ -152,14 +152,14 @@ struct Gameboy
         /* Set to true whenever a complete new frame is available */
         /* Reset this when you read the frame */
         bool NewFrame;
-    
+
         struct GameboySprite {
             uint8_t x;
             uint8_t pixels[2];
             uint8_t attrs;
         } ScanlineSprites[10];
         unsigned int NumSprites;
-    
+
         unsigned int CurX;
     } lcd;
     struct {
@@ -167,7 +167,7 @@ struct Gameboy
     } buttons;
 };
 
-char const* gameboy_load(struct Gameboy*);
+char const* gameboy_load(struct Gameboy*, bool skipChecksum);
 int gameboy_reset(struct Gameboy*, bool enableBootROM);
 int gameboy_step(struct Gameboy*);
 uint8_t gameboy_read(struct Gameboy* gb, uint16_t addr);

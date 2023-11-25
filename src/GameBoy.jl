@@ -1,11 +1,11 @@
 module GameBoy
 
-const gblib = abspath(joinpath(@__DIR__, 
-                               "..", 
-                               "deps", 
-                               "emulator", 
-                               Sys.iswindows() ? "gameboy.dll" 
-                                               : (Sys.isapple() ? "libgameboy.dylib" 
+const gblib = abspath(joinpath(@__DIR__,
+                               "..",
+                               "deps",
+                               "emulator",
+                               Sys.iswindows() ? "gameboy.dll"
+                                               : (Sys.isapple() ? "libgameboy.dylib"
                                                                 : "libgameboy.so")))
 
 macro exportinstances(enum)
@@ -76,9 +76,9 @@ end
 """
 Open a file on disk as a ROM.
 """
-function loadrom!(gb::Emulator, path::String)
+function loadrom!(gb::Emulator, path::String; skip_checksum::Bool=false)
     ccall((:gameboy_load_rom, gblib), Cvoid, (Ptr{Cvoid}, Cstring), gb.g, path)
-    result = ccall((:gameboy_load, gblib), Cstring, (Ptr{Cvoid},), gb.g)
+    result = ccall((:gameboy_load, gblib), Cstring, (Ptr{Cvoid},Cint), gb.g, skip_checksum)
     if result != C_NULL
         free!(gb)
         error(unsafe_string(result))
