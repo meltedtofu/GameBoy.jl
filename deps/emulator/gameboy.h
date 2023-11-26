@@ -72,7 +72,6 @@ struct Cpu {
   bool InterruptEnablePending;
   bool Halted;
   bool HaltBug;
-  uint64_t TotalCycles;
 };
 
 struct Clock {

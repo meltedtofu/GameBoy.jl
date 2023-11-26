@@ -116,6 +116,31 @@ function reset!(gb::Emulator)
     nothing
 end
 
+function handleInterrupts(gb::Emulator, cpu::Ptr{Cvoid}, mem::Ptr{Cvoid})
+    iflag = ccall((:getIflag, gblib), UInt8, (Ptr{Cvoid},), mem)
+    ie = ccall((:getInterruptEnable, gblib), UInt8, (Ptr{Cvoid},), mem)
+    mask = 0x1f
+    irqs = ie & iflag & mask
+    if irqs > 0
+        ccall((:unhaltCpu, gblib), Cvoid, (Ptr{Cvoid},), cpu)
+        if ccall((:cpuIE, gblib), Bool, (Ptr{Cvoid},), cpu)
+            for i ∈ 0:5
+                bit = 0x01 << i
+                if irqs & bit > 0
+                    ccall((:cpuDisableInterrupts, gblib), Cvoid, (Ptr{Cvoid},), cpu)
+                    ccall((:clock_increment, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
+                    ccall((:clock_increment, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
+                    ccall((:clock_increment, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
+                    ccall((:Call, gblib), Cvoid, (Ptr{Cvoid}, UInt16), gb.g, 0x40 + i*8)
+                    iflag &= ~bit
+                    break
+                end
+            end
+            ccall((:setIF, gblib), Cvoid, (Ptr{Cvoid}, UInt8), mem, iflag)
+        end
+    end
+end
+
 """
 Run one frame of emulation.
 """
@@ -127,7 +152,7 @@ function doframe!(gb::Emulator)::Ptr{Cvoid}
         cpu = ccall((:getCpu, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
 
         ccall((:input_update, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), mem, buttons)
-        ccall((:cpu_handleInterrupts, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), gb.g, cpu, mem)
+        handleInterrupts(gb, cpu, mem)
         ccall((:cpu_step, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), gb.g, cpu)
 
         pixels = ccall((:updateFrameBuffer, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), lcd);

@@ -90,19 +90,23 @@ void input_setDown(struct Gameboy*, int button);
 
 void clock_increment(struct Gameboy* gb)
 {
-    gb->cpu.TotalCycles += 4;
-    gb->clock.TimerLoading = false;
-    if(gb->clock.TimerOverflow) {
+    struct Clock* clock = &(gb->clock);
+    struct Memory* mem = &(gb->mem);
+    struct DMA* dma = &(gb->dma);
+    struct LCD* lcd = &(gb->lcd);
+
+    clock->TimerLoading = false;
+    if(clock->TimerOverflow) {
         /* Delayed overflow effects */
-        gb->mem.IO[IO_InterruptFlag] |= Interrupt_TIMA;
-        gb->clock.TimerOverflow = false;
+        mem->IO[IO_InterruptFlag] |= Interrupt_TIMA;
+        clock->TimerOverflow = false;
 
         /* In the next machine cycle the modulo is being loaded */
-        gb->mem.IO[IO_TimerCounter] = gb->mem.IO[IO_TimerModulo];
-        gb->clock.TimerLoading = true;
+        mem->IO[IO_TimerCounter] = mem->IO[IO_TimerModulo];
+        clock->TimerLoading = true;
     }
-    clock_countChange(&(gb->clock), &(gb->mem), gb->clock.CycleCount + 4);
-    dma_update(&(gb->dma), &(gb->mem));
+    clock_countChange(clock, mem, clock->CycleCount + 4);
+    dma_update(dma, mem);
     /* Video runs at 1 pixel per clock (4 per machine cycle) */
     video_update(gb);
     video_update(gb);
@@ -1854,7 +1858,6 @@ char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
 }
 int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
 {
-    gb->cpu.TotalCycles = 0;
     gb->clock.CycleCount = 0;
     gb->clock.TimerOverflow = false;
     gb->clock.TimerLoading = false;
@@ -1985,12 +1988,36 @@ struct Memory* getMemory(struct Gameboy* gb) {
   return &(gb->mem);
 }
 
+uint8_t getIflag(struct Memory* mem) {
+  return mem->IO[IO_InterruptFlag];
+}
+
+uint8_t getInterruptEnable(struct Memory* mem) {
+  return mem->InterruptEnable;
+}
+
+void setIF(struct Memory* mem, uint8_t iflag) {
+  mem->IO[IO_InterruptFlag] = iflag;
+}
+
 struct Buttons* getButtons(struct Gameboy* gb) {
   return &(gb->buttons);
 }
 
 struct Cpu* getCpu(struct Gameboy* gb) {
   return &(gb->cpu);
+}
+
+void unhaltCpu(struct Cpu* cpu) {
+  cpu->Halted = false;
+}
+
+bool cpuIE(struct Cpu* cpu) {
+  return cpu->InterruptsEnabled;
+}
+
+void cpuDisableInterrupts(struct Cpu* cpu) {
+  cpu->InterruptsEnabled = false;
 }
 
 struct LCD* getLCD(struct Gameboy* gb) {
