@@ -81,8 +81,8 @@ static uint8_t const IOUnusedBits[128] = {
     // ...
 };
 static void clock_countChange(struct Clock* clock, struct Memory* mem, uint16_t new_value);
-static uint8_t mmu_read(struct Gameboy*, int);
-static void mmu_write(struct Gameboy*, int, uint8_t);
+uint8_t mmu_read(struct Gameboy*, int);
+void mmu_write(struct Gameboy*, int, uint8_t);
 static void dma_update(struct DMA*, struct Memory*);
 void video_update(struct Gameboy* gb);
 void input_setUp(struct Gameboy*, int button);
@@ -439,23 +439,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
 {
 
     switch(opcode) {
-    // ld $reg8, ($hl)
-    case 0x46: cpu->B = mmu_read(gb, ReadHL(cpu)); break;
-    case 0x4E: cpu->C = mmu_read(gb, ReadHL(cpu)); break;
-    case 0x56: cpu->D = mmu_read(gb, ReadHL(cpu)); break;
-    case 0x5E: cpu->E = mmu_read(gb, ReadHL(cpu)); break;
-    case 0x66: cpu->H = mmu_read(gb, ReadHL(cpu)); break;
-    case 0x6E: cpu->L = mmu_read(gb, ReadHL(cpu)); break;
-    case 0x7E: cpu->A = mmu_read(gb, ReadHL(cpu)); break;
-
-    // ld ($hl), $reg8
-    case 0x70: mmu_write(gb, ReadHL(cpu), cpu->B); break;
-    case 0x71: mmu_write(gb, ReadHL(cpu), cpu->C); break;
-    case 0x72: mmu_write(gb, ReadHL(cpu), cpu->D); break;
-    case 0x73: mmu_write(gb, ReadHL(cpu), cpu->E); break;
-    case 0x74: mmu_write(gb, ReadHL(cpu), cpu->H); break;
-    case 0x75: mmu_write(gb, ReadHL(cpu), cpu->L); break;
-    case 0x77: mmu_write(gb, ReadHL(cpu), cpu->A); break;
     case 0x36: mmu_write(gb, ReadHL(cpu), Imm8(gb)); break; // ld ($hl), imm8
     // ld $a, ($reg16)
     case 0x0A: cpu->A = mmu_read(gb, ReadBC(cpu)); break;
@@ -1164,7 +1147,7 @@ static void mmu_setRAMBank(struct Gameboy* gb, unsigned int addr, uint8_t data)
     }
 }
 
-static uint8_t mmu_read(struct Gameboy* gb, int addr) {
+uint8_t mmu_read(struct Gameboy* gb, int addr) {
     clock_increment(gb);
 
     if(gb->dma.Active && addr < 0xFF80) {
@@ -1290,7 +1273,7 @@ static void mmu_writeDirect(struct Gameboy* gb, uint16_t addr, uint8_t value)
     }
 }
 
-static void mmu_write(struct Gameboy* gb, int addr, uint8_t value) {
+void mmu_write(struct Gameboy* gb, int addr, uint8_t value) {
     clock_increment(gb);
 
     /* TODO is access to IO space (0xFF00 - 0xFF7F) OK? */
