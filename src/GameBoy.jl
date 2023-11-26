@@ -21,7 +21,7 @@ struct Emulator
     frameStride::Int
 
     Emulator() = new(ccall((:gameboy_alloc, gblib), Ptr{Cvoid}, ()),
-		     ccall((:gameboy_frame_stride, gblib), Int, ()),
+                     ccall((:gameboy_frame_stride, gblib), Int, ()),
                     )
 end
 
@@ -120,7 +120,21 @@ end
 Run one frame of emulation.
 """
 function doframe!(gb::Emulator)::Ptr{Cvoid}
-    ccall((:gameboy_do_frame, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
+    while true
+        mem = ccall((:getMemory, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
+        buttons = ccall((:getButtons, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
+        lcd = ccall((:getLCD, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
+        cpu = ccall((:getCpu, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
+
+        ccall((:input_update, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), mem, buttons)
+        ccall((:cpu_handleInterrupts, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), gb.g, cpu, mem)
+        ccall((:cpu_step, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), gb.g, cpu)
+
+        pixels = ccall((:updateFrameBuffer, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), lcd);
+        if pixels != C_NULL
+            return pixels
+        end
+    end
 end
 
 """

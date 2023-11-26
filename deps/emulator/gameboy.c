@@ -80,17 +80,17 @@ static uint8_t const IOUnusedBits[128] = {
     [IO_Joypad] = 0xC0,
     // ...
 };
-static void clock_countChange(struct Gameboy* gb, uint16_t new_value);
+static void clock_countChange(struct Clock* clock, struct Memory* mem, uint16_t new_value);
 static uint8_t mmu_read(struct Gameboy*, int);
 static void mmu_write(struct Gameboy*, int, uint8_t);
-static void dma_update(struct Gameboy*);
+static void dma_update(struct DMA*, struct Memory*);
 void video_update(struct Gameboy* gb);
 void input_setUp(struct Gameboy*, int button);
 void input_setDown(struct Gameboy*, int button);
 
 void clock_increment(struct Gameboy* gb)
 {
-    gb->TotalCycles += 4;
+    gb->cpu.TotalCycles += 4;
     gb->clock.TimerLoading = false;
     if(gb->clock.TimerOverflow) {
         /* Delayed overflow effects */
@@ -101,14 +101,15 @@ void clock_increment(struct Gameboy* gb)
         gb->mem.IO[IO_TimerCounter] = gb->mem.IO[IO_TimerModulo];
         gb->clock.TimerLoading = true;
     }
-    clock_countChange(gb, gb->clock.CycleCount + 4);
-    dma_update(gb);
+    clock_countChange(&(gb->clock), &(gb->mem), gb->clock.CycleCount + 4);
+    dma_update(&(gb->dma), &(gb->mem));
     /* Video runs at 1 pixel per clock (4 per machine cycle) */
     video_update(gb);
     video_update(gb);
     video_update(gb);
     video_update(gb);
 }
+
 static bool clock_getTimerBit(uint8_t control, uint16_t cycles)
 {
     switch(control & 0x03) { /* Timer clock select */
@@ -123,38 +124,41 @@ static bool clock_getTimerBit(uint8_t control, uint16_t cycles)
     }
     assert(0);
 }
-static void clock_timerIncrement(struct Gameboy* gb)
+
+static void clock_timerIncrement(struct Clock* clock, struct Memory* mem)
 {
-    uint8_t timer = gb->mem.IO[IO_TimerCounter];
+    uint8_t timer = mem->IO[IO_TimerCounter];
     if(timer == 0xFF) {
-        gb->clock.TimerOverflow = true;
+        clock->TimerOverflow = true;
     }
-    gb->mem.IO[IO_TimerCounter] = timer + 1;
+    mem->IO[IO_TimerCounter] = timer + 1;
 }
-static void clock_updateTimerControl(struct Gameboy* gb, uint8_t val)
+
+static void clock_updateTimerControl(struct Clock* clock, struct Memory* mem, uint8_t val)
 {
-    uint8_t old = gb->mem.IO[IO_TimerControl];
-    gb->mem.IO[IO_TimerControl] = val;
+    uint8_t old = mem->IO[IO_TimerControl];
+    mem->IO[IO_TimerControl] = val;
 
     /* When disabled the bit to the falling edge detector is zero */
-    bool const oldBit = (old & 0x04) && clock_getTimerBit(old, gb->clock.CycleCount);
-    bool const newBit = (val & 0x04) && clock_getTimerBit(val, gb->clock.CycleCount);
+    bool const oldBit = (old & 0x04) && clock_getTimerBit(old, clock->CycleCount);
+    bool const newBit = (val & 0x04) && clock_getTimerBit(val, clock->CycleCount);
 
     /* Check for falling edge */
     if(oldBit && !newBit) {
-        clock_timerIncrement(gb);
+        clock_timerIncrement(clock, mem);
     }
 }
-static void clock_countChange(struct Gameboy* gb, uint16_t new_value)
+
+static void clock_countChange(struct Clock *clock, struct Memory *mem, uint16_t new_value)
 {
-    uint8_t tac = gb->mem.IO[IO_TimerControl];
+    uint8_t tac = mem->IO[IO_TimerControl];
     if(tac & 0x04) { /* Timer enable */
-        if(!clock_getTimerBit(tac, new_value) && clock_getTimerBit(tac, gb->clock.CycleCount)) {
-            clock_timerIncrement(gb);
+        if(!clock_getTimerBit(tac, new_value) && clock_getTimerBit(tac, clock->CycleCount)) {
+            clock_timerIncrement(clock, mem);
         }
     }
-    gb->clock.CycleCount = new_value;
-    gb->mem.IO[IO_Divider] = new_value >> 8u;
+    clock->CycleCount = new_value;
+    mem->IO[IO_Divider] = new_value >> 8u;
 }
 static inline uint8_t Imm8(struct Gameboy* gb)
 {
@@ -173,31 +177,31 @@ static inline uint16_t Imm16(struct Gameboy* gb)
     uint8_t const hi = Imm8(gb);
     return (hi << 8u) | lo;
 }
-uint16_t ReadAF(struct Gameboy* gb) { return ((gb->cpu.A) << 8u) | (gb->cpu.F); }
-uint16_t ReadBC(struct Gameboy* gb) { return ((gb->cpu.B) << 8u) | (gb->cpu.C); }
-uint16_t ReadDE(struct Gameboy* gb) { return ((gb->cpu.D) << 8u) | (gb->cpu.E); }
-uint16_t ReadHL(struct Gameboy* gb) { return ((gb->cpu.H) << 8u) | (gb->cpu.L); }
+uint16_t ReadAF(struct Cpu* cpu) { return ((cpu->A) << 8u) | (cpu->F); }
+uint16_t ReadBC(struct Cpu* cpu) { return ((cpu->B) << 8u) | (cpu->C); }
+uint16_t ReadDE(struct Cpu* cpu) { return ((cpu->D) << 8u) | (cpu->E); }
+uint16_t ReadHL(struct Cpu* cpu) { return ((cpu->H) << 8u) | (cpu->L); }
 
-void WriteAF(struct Gameboy* gb, uint16_t af) { gb->cpu.A = (af >> 8u); gb->cpu.F = (af & 0xF0); }
-void WriteBC(struct Gameboy* gb, uint16_t bc) { gb->cpu.B = (bc >> 8u); gb->cpu.C = (bc & 0xFF); }
-void WriteDE(struct Gameboy* gb, uint16_t de) { gb->cpu.D = (de >> 8u); gb->cpu.E = (de & 0xFF); }
-void WriteHL(struct Gameboy* gb, uint16_t hl) { gb->cpu.H = (hl >> 8u); gb->cpu.L = (hl & 0xFF); }
-void UpdateZ(struct Gameboy* gb, bool set) { if(set) { gb->cpu.F |= 0x80; } else { gb->cpu.F &= ~0x80; } }
-void UpdateN(struct Gameboy* gb, bool set) { if(set) { gb->cpu.F |= 0x40; } else { gb->cpu.F &= ~0x40; } }
-void UpdateH(struct Gameboy* gb, bool set) { if(set) { gb->cpu.F |= 0x20; } else { gb->cpu.F &= ~0x20; } }
-void UpdateC(struct Gameboy* gb, bool set) { if(set) { gb->cpu.F |= 0x10; } else { gb->cpu.F &= ~0x10; } }
+void WriteAF(struct Cpu* cpu, uint16_t af) { cpu->A = (af >> 8u); cpu->F = (af & 0xF0); }
+void WriteBC(struct Cpu* cpu, uint16_t bc) { cpu->B = (bc >> 8u); cpu->C = (bc & 0xFF); }
+void WriteDE(struct Cpu* cpu, uint16_t de) { cpu->D = (de >> 8u); cpu->E = (de & 0xFF); }
+void WriteHL(struct Cpu* cpu, uint16_t hl) { cpu->H = (hl >> 8u); cpu->L = (hl & 0xFF); }
+void UpdateZ(struct Cpu* cpu, bool set) { if(set) { cpu->F |= 0x80; } else { cpu->F &= ~0x80; } }
+void UpdateN(struct Cpu* cpu, bool set) { if(set) { cpu->F |= 0x40; } else { cpu->F &= ~0x40; } }
+void UpdateH(struct Cpu* cpu, bool set) { if(set) { cpu->F |= 0x20; } else { cpu->F &= ~0x20; } }
+void UpdateC(struct Cpu* cpu, bool set) { if(set) { cpu->F |= 0x10; } else { cpu->F &= ~0x10; } }
 
-bool ReadZ(struct Gameboy* gb) { return gb->cpu.F & 0x80; }
-bool ReadN(struct Gameboy* gb) { return gb->cpu.F & 0x40; }
-bool ReadH(struct Gameboy* gb) { return gb->cpu.F & 0x20; }
-bool ReadC(struct Gameboy* gb) { return gb->cpu.F & 0x10; }
+bool ReadZ(struct Cpu* cpu) { return cpu->F & 0x80; }
+bool ReadN(struct Cpu* cpu) { return cpu->F & 0x40; }
+bool ReadH(struct Cpu* cpu) { return cpu->F & 0x20; }
+bool ReadC(struct Cpu* cpu) { return cpu->F & 0x10; }
 
-void UpdateZNHC(struct Gameboy* gb, bool z, bool n, bool h, bool c)
+void UpdateZNHC(struct Cpu* cpu, bool z, bool n, bool h, bool c)
 {
-    UpdateZ(gb, z);
-    UpdateN(gb, n);
-    UpdateH(gb, h);
-    UpdateC(gb, c);
+    UpdateZ(cpu, z);
+    UpdateN(cpu, n);
+    UpdateH(cpu, h);
+    UpdateC(cpu, c);
 }
 void Push16(struct Gameboy* gb, uint16_t val)
 {
@@ -213,50 +217,50 @@ uint16_t Pop16(struct Gameboy* gb)
     val |= mmu_read(gb, gb->cpu.SP - 1) << 8;
     return val;
 }
-uint8_t Add8(struct Gameboy* gb, uint8_t val0, uint8_t val1, bool carry)
+uint8_t Add8(struct Cpu* cpu, uint8_t val0, uint8_t val1, bool carry)
 {
     unsigned int sum = val0 + val1 + carry;
     unsigned int halfSum = (val0 & 0xF) + (val1 & 0xF) + carry;
-    UpdateZNHC(gb, (sum & 0xFF) == 0, false, halfSum > 0xF, sum > 0xFF);
+    UpdateZNHC(cpu, (sum & 0xFF) == 0, false, halfSum > 0xF, sum > 0xFF);
     return sum & 0xFF;
 }
-uint8_t Sub8(struct Gameboy* gb, uint8_t val0, uint8_t val1, bool carry)
+uint8_t Sub8(struct Cpu* cpu, uint8_t val0, uint8_t val1, bool carry)
 {
     unsigned int sum = val0 - val1 - carry;
     unsigned int halfSum = (val0 & 0xF) - (val1 & 0xF) - carry;
-    UpdateZNHC(gb, (sum & 0xFF) == 0, true, halfSum > 0xF, sum > 0xFF);
+    UpdateZNHC(cpu, (sum & 0xFF) == 0, true, halfSum > 0xF, sum > 0xFF);
     return sum;
 }
-uint8_t Inc8(struct Gameboy* gb, uint8_t val)
+uint8_t Inc8(struct Cpu* cpu, uint8_t val)
 {
-    UpdateZ(gb, val == 0xFF);
-    UpdateN(gb, false);
-    UpdateH(gb, (val & 0xF) == 0xF);
+    UpdateZ(cpu, val == 0xFF);
+    UpdateN(cpu, false);
+    UpdateH(cpu, (val & 0xF) == 0xF);
     return val + 1;
 }
-uint8_t Dec8(struct Gameboy* gb, uint8_t val)
+uint8_t Dec8(struct Cpu* cpu, int8_t val)
 {
-    UpdateZ(gb, val == 0x01);
-    UpdateN(gb, true);
-    UpdateH(gb, (val & 0xF) == 0x0);
+    UpdateZ(cpu, val == 0x01);
+    UpdateN(cpu, true);
+    UpdateH(cpu, (val & 0xF) == 0x0);
     return val - 1;
 }
-void BitAnd(struct Gameboy* gb, uint8_t value)
+void BitAnd(struct Cpu* cpu, uint8_t value)
 {
-    gb->cpu.A &= value;
-    UpdateZNHC(gb, gb->cpu.A == 0, false, true, false);
+    cpu->A &= value;
+    UpdateZNHC(cpu, cpu->A == 0, false, true, false);
 }
 
-void BitOr(struct Gameboy* gb, uint8_t value)
+void BitOr(struct Cpu* cpu, uint8_t value)
 {
-    gb->cpu.A |= value;
-    UpdateZNHC(gb, gb->cpu.A == 0, false, false, false);
+    cpu->A |= value;
+    UpdateZNHC(cpu, cpu->A == 0, false, false, false);
 }
 
-void BitXor(struct Gameboy* gb, uint8_t value)
+void BitXor(struct Cpu* cpu, uint8_t value)
 {
-    gb->cpu.A ^= value;
-    UpdateZNHC(gb, gb->cpu.A == 0, false, false, false);
+    cpu->A ^= value;
+    UpdateZNHC(cpu, cpu->A == 0, false, false, false);
 }
 uint8_t ReadRegN(struct Gameboy* gb, unsigned int regNum)
 {
@@ -267,7 +271,7 @@ uint8_t ReadRegN(struct Gameboy* gb, unsigned int regNum)
         case 3: return gb->cpu.E;
         case 4: return gb->cpu.H;
         case 5: return gb->cpu.L;
-        case 6: return mmu_read(gb, ReadHL(gb));
+        case 6: return mmu_read(gb, ReadHL(&(gb->cpu)));
         case 7: return gb->cpu.A;
     }
     assert(false);
@@ -282,11 +286,11 @@ void WriteRegN(struct Gameboy* gb, unsigned int regNum, uint8_t newVal)
         case 3: gb->cpu.E = newVal; break;
         case 4: gb->cpu.H = newVal; break;
         case 5: gb->cpu.L = newVal; break;
-        case 6: mmu_write(gb, ReadHL(gb), newVal); break;
+        case 6: mmu_write(gb, ReadHL(&(gb->cpu)), newVal); break;
         case 7: gb->cpu.A = newVal; break;
     }
 }
-void cpu_cb_op(struct Gameboy* gb)
+void cpu_cb_op(struct Gameboy* gb, struct Cpu* cpu)
 {
     uint8_t const cb_opcode = Imm8(gb);
 
@@ -303,50 +307,50 @@ void cpu_cb_op(struct Gameboy* gb)
             switch(bit) {
                 case 0: { // rlc rN
                     uint8_t val = ReadRegN(gb, reg);
-                    UpdateZNHC(gb, val == 0, false, false, (val & 0x80));
+                    UpdateZNHC(cpu, val == 0, false, false, (val & 0x80));
                     val = (val << 1u) | (val >> 7u);
                     WriteRegN(gb, reg, val);
                 } break;
                 case 1: { // rrc rN
                     uint8_t val = ReadRegN(gb, reg);
-                    UpdateZNHC(gb, val == 0, false, false, (val & 0x01));
+                    UpdateZNHC(cpu, val == 0, false, false, (val & 0x01));
                     val = (val >> 1u) | (val << 7u);
                     WriteRegN(gb, reg, val);
                 } break;
                 case 2: { // rl rN
                     uint8_t val = ReadRegN(gb, reg);
-                    uint8_t rotated = (val << 1u) | (ReadC(gb)? 1 : 0);
-                    UpdateZNHC(gb, rotated == 0, false, false, (val & 0x80));
+                    uint8_t rotated = (val << 1u) | (ReadC(cpu)? 1 : 0);
+                    UpdateZNHC(cpu, rotated == 0, false, false, (val & 0x80));
                     WriteRegN(gb, reg, rotated);
                 } break;
                 case 3: { // rr rN
                     uint8_t val = ReadRegN(gb, reg);
-                    uint8_t rotated = (val >> 1u) | (ReadC(gb)? 0x80 : 0);
-                    UpdateZNHC(gb, rotated == 0, false, false, (val & 0x01));
+                    uint8_t rotated = (val >> 1u) | (ReadC(cpu)? 0x80 : 0);
+                    UpdateZNHC(cpu, rotated == 0, false, false, (val & 0x01));
                     WriteRegN(gb, reg, rotated);
                 } break;
                 case 4: { // sla rN
                     uint8_t val = ReadRegN(gb, reg);
                     uint8_t shifted = val << 1u;
-                    UpdateZNHC(gb, shifted == 0, false, false, (val & 0x80));
+                    UpdateZNHC(cpu, shifted == 0, false, false, (val & 0x80));
                     WriteRegN(gb, reg, shifted);
                 } break;
                 case 5: { // sra rN
                     uint8_t val = ReadRegN(gb, reg);
                     uint8_t shifted = (val >> 1u) | (val & 0x80);
-                    UpdateZNHC(gb, (shifted == 0), false, false, (val & 0x01));
+                    UpdateZNHC(cpu, (shifted == 0), false, false, (val & 0x01));
                     WriteRegN(gb, reg, shifted);
                 } break;
                 case 6: { // swap rN
                     uint8_t val = ReadRegN(gb, reg);
                     val = (val >> 4u) | (val << 4u);
-                    UpdateZNHC(gb, val == 0, false, false, false);
+                    UpdateZNHC(cpu, val == 0, false, false, false);
                     WriteRegN(gb, reg, val);
                 } break;
                 case 7: { // srl rN
                     uint8_t val = ReadRegN(gb, reg);
                     uint8_t shifted = val >> 1u;
-                    UpdateZNHC(gb, shifted == 0, false, false, (val & 0x01));
+                    UpdateZNHC(cpu, shifted == 0, false, false, (val & 0x01));
                     WriteRegN(gb, reg, shifted);
                 } break;
             }
@@ -354,9 +358,9 @@ void cpu_cb_op(struct Gameboy* gb)
         break;
         case 1: { // bit n, rN
             uint8_t val = ReadRegN(gb, reg);
-            UpdateZ(gb, (val & (1u << bit)) == 0);
-            UpdateN(gb, false);
-            UpdateH(gb, true);
+            UpdateZ(cpu, (val & (1u << bit)) == 0);
+            UpdateN(cpu, false);
+            UpdateH(cpu, true);
         }
         break;
         case 2: { // res n, rN
@@ -371,77 +375,50 @@ void cpu_cb_op(struct Gameboy* gb)
         break;
     }
 }
-uint16_t Add16(struct Gameboy* gb, uint16_t val0, uint16_t val1)
+uint16_t Add16(struct Cpu* cpu, uint16_t val0, uint16_t val1)
 {
     unsigned int sum = val0 + val1;
     unsigned int halfSum = (val0 & 0xFFF) + (val1 & 0xFFF);
-    UpdateN(gb, false);
-    UpdateH(gb, halfSum > 0xFFF);
-    UpdateC(gb, sum > 0xFFFF);
+    UpdateN(cpu, false);
+    UpdateH(cpu, halfSum > 0xFFF);
+    UpdateC(cpu, sum > 0xFFFF);
     return sum & 0xFFFF;
 }
-void Jump(struct Gameboy* gb, uint16_t addr)
+void Jump(struct Cpu* cpu, uint16_t addr)
 {
-    clock_increment(gb);
-    gb->cpu.PC = addr;
+    cpu->PC = addr;
 }
 
-void JumpCond(struct Gameboy* gb, uint16_t addr, bool cond)
+void JumpRel(struct Cpu* cpu, int8_t offset)
 {
-    if(cond) {
-        Jump(gb, addr);
-    }
-}
-void JumpRel(struct Gameboy* gb, int8_t offset)
-{
-    clock_increment(gb);
-    gb->cpu.PC += offset;
+    cpu->PC += offset;
 }
 
-void JumpRelCond(struct Gameboy* gb, int8_t offset, bool cond)
-{
-    if(cond) {
-        JumpRel(gb, offset);
-    }
-}
 void Call(struct Gameboy* gb, uint16_t addr)
 {
-    clock_increment(gb);
     Push16(gb, gb->cpu.PC);
     gb->cpu.PC = addr;
 }
 
-void CallCond(struct Gameboy* gb, uint16_t addr, bool cond)
-{
-    if(cond) {
-        Call(gb, addr);
-    }
-}
 void Ret(struct Gameboy* gb)
 {
-    Jump(gb, Pop16(gb));
+    Jump(&(gb->cpu), Pop16(gb));
 }
 
-void RetCond(struct Gameboy* gb, bool cond)
+void cpu_handleInterrupts(struct Gameboy* gb, struct Cpu* cpu, struct Memory* mem)
 {
-    clock_increment(gb);
-    if(cond) {
-        Ret(gb);
-    }
-}
-void cpu_handleInterrupts(struct Gameboy* gb)
-{
-    uint8_t iflag = gb->mem.IO[IO_InterruptFlag];
-    uint8_t irqs = (gb->mem.InterruptEnable & iflag & Interrupt_Mask);
+    uint8_t iflag = mem->IO[IO_InterruptFlag];
+    uint8_t irqs = (mem->InterruptEnable & iflag & Interrupt_Mask);
     if(irqs) {
-        gb->cpu.Halted = false;
-        if(gb->cpu.InterruptsEnabled) {
-            assert(!gb->cpu.InterruptEnablePending);
+        cpu->Halted = false;
+        if(cpu->InterruptsEnabled) {
+            assert(!cpu->InterruptEnablePending);
             // handle interrupts in priority order
             for(unsigned int i = 0; i < 5; i += 1) {
                 uint8_t const bit = 1u << i;
                 if(irqs & bit) {
-                    gb->cpu.InterruptsEnabled = false;
+                    cpu->InterruptsEnabled = false;
+                    clock_increment(gb);
                     clock_increment(gb);
                     clock_increment(gb);
                     Call(gb, 0x40 + (i * 8));
@@ -449,471 +426,604 @@ void cpu_handleInterrupts(struct Gameboy* gb)
                     break;
                 }
             }
-            gb->mem.IO[IO_InterruptFlag] = iflag;
+            mem->IO[IO_InterruptFlag] = iflag;
         }
     }
 }
-static uint8_t mmu_readDirect(struct Gameboy* gb, uint16_t addr);
-void cpu_step(struct Gameboy* gb)
+static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr);
+void cpu_step(struct Gameboy* gb, struct Cpu* cpu)
 {
-    if(gb->cpu.Halted) {
+    if(cpu->Halted) {
         clock_increment(gb);
         return;
     }
 
-    if(gb->cpu.InterruptEnablePending) {
-        gb->cpu.InterruptsEnabled = true;
-        gb->cpu.InterruptEnablePending = false;
+    if(cpu->InterruptEnablePending) {
+        cpu->InterruptsEnabled = true;
+        cpu->InterruptEnablePending = false;
     }
 
     uint8_t const opcode = Imm8(gb);
 
-    if(gb->cpu.HaltBug) {
-        gb->cpu.HaltBug = false;
-        gb->cpu.PC -= 1;
+    if(cpu->HaltBug) {
+        cpu->HaltBug = false;
+        cpu->PC -= 1;
     }
 
     switch(opcode) {
     // ld $b, $reg8
-    case 0x40: gb->cpu.B = gb->cpu.B; break;
-    case 0x41: gb->cpu.B = gb->cpu.C; break;
-    case 0x42: gb->cpu.B = gb->cpu.D; break;
-    case 0x43: gb->cpu.B = gb->cpu.E; break;
-    case 0x44: gb->cpu.B = gb->cpu.H; break;
-    case 0x45: gb->cpu.B = gb->cpu.L; break;
-    case 0x47: gb->cpu.B = gb->cpu.A; break;
+    case 0x40: cpu->B = cpu->B; break;
+    case 0x41: cpu->B = cpu->C; break;
+    case 0x42: cpu->B = cpu->D; break;
+    case 0x43: cpu->B = cpu->E; break;
+    case 0x44: cpu->B = cpu->H; break;
+    case 0x45: cpu->B = cpu->L; break;
+    case 0x47: cpu->B = cpu->A; break;
 
     // ld $c, $reg8
-    case 0x48: gb->cpu.C = gb->cpu.B; break;
-    case 0x49: gb->cpu.C = gb->cpu.C; break;
-    case 0x4A: gb->cpu.C = gb->cpu.D; break;
-    case 0x4B: gb->cpu.C = gb->cpu.E; break;
-    case 0x4C: gb->cpu.C = gb->cpu.H; break;
-    case 0x4D: gb->cpu.C = gb->cpu.L; break;
-    case 0x4F: gb->cpu.C = gb->cpu.A; break;
+    case 0x48: cpu->C = cpu->B; break;
+    case 0x49: cpu->C = cpu->C; break;
+    case 0x4A: cpu->C = cpu->D; break;
+    case 0x4B: cpu->C = cpu->E; break;
+    case 0x4C: cpu->C = cpu->H; break;
+    case 0x4D: cpu->C = cpu->L; break;
+    case 0x4F: cpu->C = cpu->A; break;
 
     // ld $d, $reg8
-    case 0x50: gb->cpu.D = gb->cpu.B; break;
-    case 0x51: gb->cpu.D = gb->cpu.C; break;
-    case 0x52: gb->cpu.D = gb->cpu.D; break;
-    case 0x53: gb->cpu.D = gb->cpu.E; break;
-    case 0x54: gb->cpu.D = gb->cpu.H; break;
-    case 0x55: gb->cpu.D = gb->cpu.L; break;
-    case 0x57: gb->cpu.D = gb->cpu.A; break;
+    case 0x50: cpu->D = cpu->B; break;
+    case 0x51: cpu->D = cpu->C; break;
+    case 0x52: cpu->D = cpu->D; break;
+    case 0x53: cpu->D = cpu->E; break;
+    case 0x54: cpu->D = cpu->H; break;
+    case 0x55: cpu->D = cpu->L; break;
+    case 0x57: cpu->D = cpu->A; break;
 
     // ld $e, $reg8
-    case 0x58: gb->cpu.E = gb->cpu.B; break;
-    case 0x59: gb->cpu.E = gb->cpu.C; break;
-    case 0x5A: gb->cpu.E = gb->cpu.D; break;
-    case 0x5B: gb->cpu.E = gb->cpu.E; break;
-    case 0x5C: gb->cpu.E = gb->cpu.H; break;
-    case 0x5D: gb->cpu.E = gb->cpu.L; break;
-    case 0x5F: gb->cpu.E = gb->cpu.A; break;
+    case 0x58: cpu->E = cpu->B; break;
+    case 0x59: cpu->E = cpu->C; break;
+    case 0x5A: cpu->E = cpu->D; break;
+    case 0x5B: cpu->E = cpu->E; break;
+    case 0x5C: cpu->E = cpu->H; break;
+    case 0x5D: cpu->E = cpu->L; break;
+    case 0x5F: cpu->E = cpu->A; break;
 
     // ld $h, $reg8
-    case 0x60: gb->cpu.H = gb->cpu.B; break;
-    case 0x61: gb->cpu.H = gb->cpu.C; break;
-    case 0x62: gb->cpu.H = gb->cpu.D; break;
-    case 0x63: gb->cpu.H = gb->cpu.E; break;
-    case 0x64: gb->cpu.H = gb->cpu.H; break;
-    case 0x65: gb->cpu.H = gb->cpu.L; break;
-    case 0x67: gb->cpu.H = gb->cpu.A; break;
+    case 0x60: cpu->H = cpu->B; break;
+    case 0x61: cpu->H = cpu->C; break;
+    case 0x62: cpu->H = cpu->D; break;
+    case 0x63: cpu->H = cpu->E; break;
+    case 0x64: cpu->H = cpu->H; break;
+    case 0x65: cpu->H = cpu->L; break;
+    case 0x67: cpu->H = cpu->A; break;
 
     // ld $l, $reg8
-    case 0x68: gb->cpu.L = gb->cpu.B; break;
-    case 0x69: gb->cpu.L = gb->cpu.C; break;
-    case 0x6A: gb->cpu.L = gb->cpu.D; break;
-    case 0x6B: gb->cpu.L = gb->cpu.E; break;
-    case 0x6C: gb->cpu.L = gb->cpu.H; break;
-    case 0x6D: gb->cpu.L = gb->cpu.L; break;
-    case 0x6F: gb->cpu.L = gb->cpu.A; break;
+    case 0x68: cpu->L = cpu->B; break;
+    case 0x69: cpu->L = cpu->C; break;
+    case 0x6A: cpu->L = cpu->D; break;
+    case 0x6B: cpu->L = cpu->E; break;
+    case 0x6C: cpu->L = cpu->H; break;
+    case 0x6D: cpu->L = cpu->L; break;
+    case 0x6F: cpu->L = cpu->A; break;
 
     // ld $a, $reg8
-    case 0x78: gb->cpu.A = gb->cpu.B; break;
-    case 0x79: gb->cpu.A = gb->cpu.C; break;
-    case 0x7A: gb->cpu.A = gb->cpu.D; break;
-    case 0x7B: gb->cpu.A = gb->cpu.E; break;
-    case 0x7C: gb->cpu.A = gb->cpu.H; break;
-    case 0x7D: gb->cpu.A = gb->cpu.L; break;
-    case 0x7F: gb->cpu.A = gb->cpu.A; break;
+    case 0x78: cpu->A = cpu->B; break;
+    case 0x79: cpu->A = cpu->C; break;
+    case 0x7A: cpu->A = cpu->D; break;
+    case 0x7B: cpu->A = cpu->E; break;
+    case 0x7C: cpu->A = cpu->H; break;
+    case 0x7D: cpu->A = cpu->L; break;
+    case 0x7F: cpu->A = cpu->A; break;
     // ld $reg8, ($hl)
-    case 0x46: gb->cpu.B = mmu_read(gb, ReadHL(gb)); break;
-    case 0x4E: gb->cpu.C = mmu_read(gb, ReadHL(gb)); break;
-    case 0x56: gb->cpu.D = mmu_read(gb, ReadHL(gb)); break;
-    case 0x5E: gb->cpu.E = mmu_read(gb, ReadHL(gb)); break;
-    case 0x66: gb->cpu.H = mmu_read(gb, ReadHL(gb)); break;
-    case 0x6E: gb->cpu.L = mmu_read(gb, ReadHL(gb)); break;
-    case 0x7E: gb->cpu.A = mmu_read(gb, ReadHL(gb)); break;
+    case 0x46: cpu->B = mmu_read(gb, ReadHL(cpu)); break;
+    case 0x4E: cpu->C = mmu_read(gb, ReadHL(cpu)); break;
+    case 0x56: cpu->D = mmu_read(gb, ReadHL(cpu)); break;
+    case 0x5E: cpu->E = mmu_read(gb, ReadHL(cpu)); break;
+    case 0x66: cpu->H = mmu_read(gb, ReadHL(cpu)); break;
+    case 0x6E: cpu->L = mmu_read(gb, ReadHL(cpu)); break;
+    case 0x7E: cpu->A = mmu_read(gb, ReadHL(cpu)); break;
 
     // ld ($hl), $reg8
-    case 0x70: mmu_write(gb, ReadHL(gb), gb->cpu.B); break;
-    case 0x71: mmu_write(gb, ReadHL(gb), gb->cpu.C); break;
-    case 0x72: mmu_write(gb, ReadHL(gb), gb->cpu.D); break;
-    case 0x73: mmu_write(gb, ReadHL(gb), gb->cpu.E); break;
-    case 0x74: mmu_write(gb, ReadHL(gb), gb->cpu.H); break;
-    case 0x75: mmu_write(gb, ReadHL(gb), gb->cpu.L); break;
-    case 0x77: mmu_write(gb, ReadHL(gb), gb->cpu.A); break;
-    case 0x36: mmu_write(gb, ReadHL(gb), Imm8(gb)); break; // ld ($hl), imm8
+    case 0x70: mmu_write(gb, ReadHL(cpu), cpu->B); break;
+    case 0x71: mmu_write(gb, ReadHL(cpu), cpu->C); break;
+    case 0x72: mmu_write(gb, ReadHL(cpu), cpu->D); break;
+    case 0x73: mmu_write(gb, ReadHL(cpu), cpu->E); break;
+    case 0x74: mmu_write(gb, ReadHL(cpu), cpu->H); break;
+    case 0x75: mmu_write(gb, ReadHL(cpu), cpu->L); break;
+    case 0x77: mmu_write(gb, ReadHL(cpu), cpu->A); break;
+    case 0x36: mmu_write(gb, ReadHL(cpu), Imm8(gb)); break; // ld ($hl), imm8
     // ld $a, ($reg16)
-    case 0x0A: gb->cpu.A = mmu_read(gb, ReadBC(gb)); break;
-    case 0x1A: gb->cpu.A = mmu_read(gb, ReadDE(gb)); break;
+    case 0x0A: cpu->A = mmu_read(gb, ReadBC(cpu)); break;
+    case 0x1A: cpu->A = mmu_read(gb, ReadDE(cpu)); break;
 
     // ld ($reg16), $a
-    case 0x02: mmu_write(gb, ReadBC(gb), gb->cpu.A); break;
-    case 0x12: mmu_write(gb, ReadDE(gb), gb->cpu.A); break;
-    case 0xEA: mmu_write(gb, Imm16(gb), gb->cpu.A); break; // ld (imm16), $a
-    case 0xFA: gb->cpu.A = mmu_read(gb, Imm16(gb)); break; // ld $a, (imm16)
+    case 0x02: mmu_write(gb, ReadBC(cpu), cpu->A); break;
+    case 0x12: mmu_write(gb, ReadDE(cpu), cpu->A); break;
+    case 0xEA: mmu_write(gb, Imm16(gb), cpu->A); break; // ld (imm16), $a
+    case 0xFA: cpu->A = mmu_read(gb, Imm16(gb)); break; // ld $a, (imm16)
     case 0x22: // ld ($hl+), $a
-        mmu_write(gb, ReadHL(gb), gb->cpu.A);
-        WriteHL(gb, ReadHL(gb) + 1);
+        mmu_write(gb, ReadHL(cpu), cpu->A);
+        WriteHL(cpu, ReadHL(cpu) + 1);
         break;
     case 0x2A: // ld $a, ($hl+)
-        gb->cpu.A = mmu_read(gb, ReadHL(gb));
-        WriteHL(gb, ReadHL(gb) + 1);
+        cpu->A = mmu_read(gb, ReadHL(cpu));
+        WriteHL(cpu, ReadHL(cpu) + 1);
         break;
     case 0x32: // ld ($hl-), $a
-        mmu_write(gb, ReadHL(gb), gb->cpu.A);
-        WriteHL(gb, ReadHL(gb) - 1);
+        mmu_write(gb, ReadHL(cpu), cpu->A);
+        WriteHL(cpu, ReadHL(cpu) - 1);
         break;
     case 0x3A: // ld $a, ($hl-)
-        gb->cpu.A = mmu_read(gb, ReadHL(gb));
-        WriteHL(gb, ReadHL(gb) - 1);
+        cpu->A = mmu_read(gb, ReadHL(cpu));
+        WriteHL(cpu, ReadHL(cpu) - 1);
         break;
-    case 0xE0: mmu_write(gb, 0xFF00 + Imm8(gb), gb->cpu.A); break; // ld (0xFF00 + imm8), $a
-    case 0xE2: mmu_write(gb, 0xFF00 + gb->cpu.C, gb->cpu.A); break; // ld (0xFF00 + $c), $a
-    case 0xF0: gb->cpu.A = mmu_read(gb, 0xFF00 + Imm8(gb)); break; // ld $a, (0xFF00 + imm8)
-    case 0xF2: gb->cpu.A = mmu_read(gb, 0xFF00 + gb->cpu.C); break; // ld $a, (0xFF00 + $c)
+    case 0xE0: mmu_write(gb, 0xFF00 + Imm8(gb), cpu->A); break; // ld (0xFF00 + imm8), $a
+    case 0xE2: mmu_write(gb, 0xFF00 + cpu->C, cpu->A); break; // ld (0xFF00 + $c), $a
+    case 0xF0: cpu->A = mmu_read(gb, 0xFF00 + Imm8(gb)); break; // ld $a, (0xFF00 + imm8)
+    case 0xF2: cpu->A = mmu_read(gb, 0xFF00 + cpu->C); break; // ld $a, (0xFF00 + $c)
     // ld $reg8, imm8
-    case 0x06: gb->cpu.B = Imm8(gb); break;
-    case 0x0E: gb->cpu.C = Imm8(gb); break;
-    case 0x16: gb->cpu.D = Imm8(gb); break;
-    case 0x1E: gb->cpu.E = Imm8(gb); break;
-    case 0x26: gb->cpu.H = Imm8(gb); break;
-    case 0x2E: gb->cpu.L = Imm8(gb); break;
-    case 0x3E: gb->cpu.A = Imm8(gb); break;
+    case 0x06: cpu->B = Imm8(gb); break;
+    case 0x0E: cpu->C = Imm8(gb); break;
+    case 0x16: cpu->D = Imm8(gb); break;
+    case 0x1E: cpu->E = Imm8(gb); break;
+    case 0x26: cpu->H = Imm8(gb); break;
+    case 0x2E: cpu->L = Imm8(gb); break;
+    case 0x3E: cpu->A = Imm8(gb); break;
     // ld $reg16, imm16
-    case 0x01: WriteBC(gb, Imm16(gb)); break;
-    case 0x11: WriteDE(gb, Imm16(gb)); break;
-    case 0x21: WriteHL(gb, Imm16(gb)); break;
-    case 0x31: gb->cpu.SP = Imm16(gb); break;
+    case 0x01: WriteBC(cpu, Imm16(gb)); break;
+    case 0x11: WriteDE(cpu, Imm16(gb)); break;
+    case 0x21: WriteHL(cpu, Imm16(gb)); break;
+    case 0x31: cpu->SP = Imm16(gb); break;
     case 0x08: { // ld (imm16), $sp
         uint16_t addr = Imm16(gb);
-        mmu_write(gb, addr, (gb->cpu.SP & 0xFF));
-        mmu_write(gb, addr + 1, (gb->cpu.SP >> 8u));
+        mmu_write(gb, addr, (cpu->SP & 0xFF));
+        mmu_write(gb, addr + 1, (cpu->SP >> 8u));
     } break;
     case 0xF9: // ld $sp, $hl
         clock_increment(gb);
-        gb->cpu.SP = ReadHL(gb);
+        cpu->SP = ReadHL(cpu);
         break;
     case 0xF8: { // ld $hl, $sp + imm8
-        uint16_t ea = gb->cpu.SP + Imm8i(gb);
+        uint16_t ea = cpu->SP + Imm8i(gb);
         clock_increment(gb);
-        WriteHL(gb, ea);
-        UpdateZNHC(gb, false, false, (ea & 0xF) < (gb->cpu.SP & 0xF), (ea & 0xFF) < (gb->cpu.SP & 0xFF));
+        WriteHL(cpu, ea);
+        UpdateZNHC(cpu, false, false, (ea & 0xF) < (cpu->SP & 0xF), (ea & 0xFF) < (cpu->SP & 0xFF));
     } break;
     // pop $reg16
-    case 0xC1: WriteBC(gb, Pop16(gb)); break;
-    case 0xD1: WriteDE(gb, Pop16(gb)); break;
-    case 0xE1: WriteHL(gb, Pop16(gb)); break;
-    case 0xF1: WriteAF(gb, Pop16(gb)); break;
+    case 0xC1: WriteBC(cpu, Pop16(gb)); break;
+    case 0xD1: WriteDE(cpu, Pop16(gb)); break;
+    case 0xE1: WriteHL(cpu, Pop16(gb)); break;
+    case 0xF1: WriteAF(cpu, Pop16(gb)); break;
 
     // push $reg16
     case 0xC5:
         clock_increment(gb);
-        Push16(gb, ReadBC(gb));
+        Push16(gb, ReadBC(cpu));
         break;
     case 0xD5:
         clock_increment(gb);
-        Push16(gb, ReadDE(gb));
+        Push16(gb, ReadDE(cpu));
         break;
     case 0xE5:
         clock_increment(gb);
-        Push16(gb, ReadHL(gb));
+        Push16(gb, ReadHL(cpu));
         break;
     case 0xF5:
         clock_increment(gb);
-        Push16(gb, ReadAF(gb));
+        Push16(gb, ReadAF(cpu));
         break;
     // add $a, reg8
-    case 0x80: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.B, false); break;
-    case 0x81: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.C, false); break;
-    case 0x82: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.D, false); break;
-    case 0x83: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.E, false); break;
-    case 0x84: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.H, false); break;
-    case 0x85: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.L, false); break;
-    case 0x87: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.A, false); break;
+    case 0x80: cpu->A = Add8(cpu, cpu->A, cpu->B, false); break;
+    case 0x81: cpu->A = Add8(cpu, cpu->A, cpu->C, false); break;
+    case 0x82: cpu->A = Add8(cpu, cpu->A, cpu->D, false); break;
+    case 0x83: cpu->A = Add8(cpu, cpu->A, cpu->E, false); break;
+    case 0x84: cpu->A = Add8(cpu, cpu->A, cpu->H, false); break;
+    case 0x85: cpu->A = Add8(cpu, cpu->A, cpu->L, false); break;
+    case 0x87: cpu->A = Add8(cpu, cpu->A, cpu->A, false); break;
     // add $a, ($hl)
-    case 0x86: gb->cpu.A = Add8(gb, gb->cpu.A, mmu_read(gb, ReadHL(gb)), false); break;
+    case 0x86: cpu->A = Add8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), false); break;
     // add $a, imm8
-    case 0xC6: gb->cpu.A = Add8(gb, gb->cpu.A, Imm8(gb), false); break;
+    case 0xC6: cpu->A = Add8(cpu, cpu->A, Imm8(gb), false); break;
     // adc $a, reg8
-    case 0x88: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.B, ReadC(gb)); break;
-    case 0x89: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.C, ReadC(gb)); break;
-    case 0x8A: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.D, ReadC(gb)); break;
-    case 0x8B: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.E, ReadC(gb)); break;
-    case 0x8C: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.H, ReadC(gb)); break;
-    case 0x8D: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.L, ReadC(gb)); break;
-    case 0x8F: gb->cpu.A = Add8(gb, gb->cpu.A, gb->cpu.A, ReadC(gb)); break;
+    case 0x88: cpu->A = Add8(cpu, cpu->A, cpu->B, ReadC(cpu)); break;
+    case 0x89: cpu->A = Add8(cpu, cpu->A, cpu->C, ReadC(cpu)); break;
+    case 0x8A: cpu->A = Add8(cpu, cpu->A, cpu->D, ReadC(cpu)); break;
+    case 0x8B: cpu->A = Add8(cpu, cpu->A, cpu->E, ReadC(cpu)); break;
+    case 0x8C: cpu->A = Add8(cpu, cpu->A, cpu->H, ReadC(cpu)); break;
+    case 0x8D: cpu->A = Add8(cpu, cpu->A, cpu->L, ReadC(cpu)); break;
+    case 0x8F: cpu->A = Add8(cpu, cpu->A, cpu->A, ReadC(cpu)); break;
     // adc $a, ($hl)
-    case 0x8E: gb->cpu.A = Add8(gb, gb->cpu.A, mmu_read(gb, ReadHL(gb)), ReadC(gb)); break;
+    case 0x8E: cpu->A = Add8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), ReadC(cpu)); break;
     // adc $a, imm8
-    case 0xCE: gb->cpu.A = Add8(gb, gb->cpu.A, Imm8(gb), ReadC(gb)); break;
+    case 0xCE: cpu->A = Add8(cpu, cpu->A, Imm8(gb), ReadC(cpu)); break;
     // sub $a, reg8
-    case 0x90: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.B, false); break;
-    case 0x91: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.C, false); break;
-    case 0x92: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.D, false); break;
-    case 0x93: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.E, false); break;
-    case 0x94: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.H, false); break;
-    case 0x95: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.L, false); break;
-    case 0x97: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.A, false); break;
+    case 0x90: cpu->A = Sub8(cpu, cpu->A, cpu->B, false); break;
+    case 0x91: cpu->A = Sub8(cpu, cpu->A, cpu->C, false); break;
+    case 0x92: cpu->A = Sub8(cpu, cpu->A, cpu->D, false); break;
+    case 0x93: cpu->A = Sub8(cpu, cpu->A, cpu->E, false); break;
+    case 0x94: cpu->A = Sub8(cpu, cpu->A, cpu->H, false); break;
+    case 0x95: cpu->A = Sub8(cpu, cpu->A, cpu->L, false); break;
+    case 0x97: cpu->A = Sub8(cpu, cpu->A, cpu->A, false); break;
     // sub $a, ($hl)
-    case 0x96: gb->cpu.A = Sub8(gb, gb->cpu.A, mmu_read(gb, ReadHL(gb)), false); break;
+    case 0x96: cpu->A = Sub8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), false); break;
     // sub $a, imm8
-    case 0xD6: gb->cpu.A = Sub8(gb, gb->cpu.A, Imm8(gb), false); break;
+    case 0xD6: cpu->A = Sub8(cpu, cpu->A, Imm8(gb), false); break;
     // sbc $a, reg8
-    case 0x98: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.B, ReadC(gb)); break;
-    case 0x99: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.C, ReadC(gb)); break;
-    case 0x9A: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.D, ReadC(gb)); break;
-    case 0x9B: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.E, ReadC(gb)); break;
-    case 0x9C: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.H, ReadC(gb)); break;
-    case 0x9D: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.L, ReadC(gb)); break;
-    case 0x9F: gb->cpu.A = Sub8(gb, gb->cpu.A, gb->cpu.A, ReadC(gb)); break;
+    case 0x98: cpu->A = Sub8(cpu, cpu->A, cpu->B, ReadC(cpu)); break;
+    case 0x99: cpu->A = Sub8(cpu, cpu->A, cpu->C, ReadC(cpu)); break;
+    case 0x9A: cpu->A = Sub8(cpu, cpu->A, cpu->D, ReadC(cpu)); break;
+    case 0x9B: cpu->A = Sub8(cpu, cpu->A, cpu->E, ReadC(cpu)); break;
+    case 0x9C: cpu->A = Sub8(cpu, cpu->A, cpu->H, ReadC(cpu)); break;
+    case 0x9D: cpu->A = Sub8(cpu, cpu->A, cpu->L, ReadC(cpu)); break;
+    case 0x9F: cpu->A = Sub8(cpu, cpu->A, cpu->A, ReadC(cpu)); break;
     // sbc $a, ($hl)
-    case 0x9E: gb->cpu.A = Sub8(gb, gb->cpu.A, mmu_read(gb, ReadHL(gb)), ReadC(gb)); break;
+    case 0x9E: cpu->A = Sub8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), ReadC(cpu)); break;
     // sbc $a, imm8
-    case 0xDE: gb->cpu.A = Sub8(gb, gb->cpu.A, Imm8(gb), ReadC(gb)); break;
+    case 0xDE: cpu->A = Sub8(cpu, cpu->A, Imm8(gb), ReadC(cpu)); break;
     // inc reg8
-    case 0x04: gb->cpu.B = Inc8(gb, gb->cpu.B); break;
-    case 0x0C: gb->cpu.C = Inc8(gb, gb->cpu.C); break;
-    case 0x14: gb->cpu.D = Inc8(gb, gb->cpu.D); break;
-    case 0x1C: gb->cpu.E = Inc8(gb, gb->cpu.E); break;
-    case 0x24: gb->cpu.H = Inc8(gb, gb->cpu.H); break;
-    case 0x2C: gb->cpu.L = Inc8(gb, gb->cpu.L); break;
-    case 0x3C: gb->cpu.A = Inc8(gb, gb->cpu.A); break;
+    case 0x04: cpu->B = Inc8(cpu, cpu->B); break;
+    case 0x0C: cpu->C = Inc8(cpu, cpu->C); break;
+    case 0x14: cpu->D = Inc8(cpu, cpu->D); break;
+    case 0x1C: cpu->E = Inc8(cpu, cpu->E); break;
+    case 0x24: cpu->H = Inc8(cpu, cpu->H); break;
+    case 0x2C: cpu->L = Inc8(cpu, cpu->L); break;
+    case 0x3C: cpu->A = Inc8(cpu, cpu->A); break;
     // dec reg8
-    case 0x05: gb->cpu.B = Dec8(gb, gb->cpu.B); break;
-    case 0x0D: gb->cpu.C = Dec8(gb, gb->cpu.C); break;
-    case 0x15: gb->cpu.D = Dec8(gb, gb->cpu.D); break;
-    case 0x1D: gb->cpu.E = Dec8(gb, gb->cpu.E); break;
-    case 0x25: gb->cpu.H = Dec8(gb, gb->cpu.H); break;
-    case 0x2D: gb->cpu.L = Dec8(gb, gb->cpu.L); break;
-    case 0x3D: gb->cpu.A = Dec8(gb, gb->cpu.A); break;
+    case 0x05: cpu->B = Dec8(cpu, cpu->B); break;
+    case 0x0D: cpu->C = Dec8(cpu, cpu->C); break;
+    case 0x15: cpu->D = Dec8(cpu, cpu->D); break;
+    case 0x1D: cpu->E = Dec8(cpu, cpu->E); break;
+    case 0x25: cpu->H = Dec8(cpu, cpu->H); break;
+    case 0x2D: cpu->L = Dec8(cpu, cpu->L); break;
+    case 0x3D: cpu->A = Dec8(cpu, cpu->A); break;
     // cp $a, reg8
-    case 0xB8: Sub8(gb, gb->cpu.A, gb->cpu.B, false); break;
-    case 0xB9: Sub8(gb, gb->cpu.A, gb->cpu.C, false); break;
-    case 0xBA: Sub8(gb, gb->cpu.A, gb->cpu.D, false); break;
-    case 0xBB: Sub8(gb, gb->cpu.A, gb->cpu.E, false); break;
-    case 0xBC: Sub8(gb, gb->cpu.A, gb->cpu.H, false); break;
-    case 0xBD: Sub8(gb, gb->cpu.A, gb->cpu.L, false); break;
-    case 0xBF: Sub8(gb, gb->cpu.A, gb->cpu.A, false); break;
+    case 0xB8: Sub8(cpu, cpu->A, cpu->B, false); break;
+    case 0xB9: Sub8(cpu, cpu->A, cpu->C, false); break;
+    case 0xBA: Sub8(cpu, cpu->A, cpu->D, false); break;
+    case 0xBB: Sub8(cpu, cpu->A, cpu->E, false); break;
+    case 0xBC: Sub8(cpu, cpu->A, cpu->H, false); break;
+    case 0xBD: Sub8(cpu, cpu->A, cpu->L, false); break;
+    case 0xBF: Sub8(cpu, cpu->A, cpu->A, false); break;
     // cp $a, ($hl)
-    case 0xBE: Sub8(gb, gb->cpu.A, mmu_read(gb, ReadHL(gb)), false); break;
+    case 0xBE: Sub8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), false); break;
     // cp $a, imm8
-    case 0xFE: Sub8(gb, gb->cpu.A, Imm8(gb), false); break;
+    case 0xFE: Sub8(cpu, cpu->A, Imm8(gb), false); break;
     // and/or/xor $a, $reg8
-    case 0xA0: BitAnd(gb, gb->cpu.B); break;
-    case 0xA1: BitAnd(gb, gb->cpu.C); break;
-    case 0xA2: BitAnd(gb, gb->cpu.D); break;
-    case 0xA3: BitAnd(gb, gb->cpu.E); break;
-    case 0xA4: BitAnd(gb, gb->cpu.H); break;
-    case 0xA5: BitAnd(gb, gb->cpu.L); break;
-    case 0xA7: BitAnd(gb, gb->cpu.A); break;
-    case 0xB0: BitOr(gb, gb->cpu.B); break;
-    case 0xB1: BitOr(gb, gb->cpu.C); break;
-    case 0xB2: BitOr(gb, gb->cpu.D); break;
-    case 0xB3: BitOr(gb, gb->cpu.E); break;
-    case 0xB4: BitOr(gb, gb->cpu.H); break;
-    case 0xB5: BitOr(gb, gb->cpu.L); break;
-    case 0xB7: BitOr(gb, gb->cpu.A); break;
-    case 0xA8: BitXor(gb, gb->cpu.B); break;
-    case 0xA9: BitXor(gb, gb->cpu.C); break;
-    case 0xAA: BitXor(gb, gb->cpu.D); break;
-    case 0xAB: BitXor(gb, gb->cpu.E); break;
-    case 0xAC: BitXor(gb, gb->cpu.H); break;
-    case 0xAD: BitXor(gb, gb->cpu.L); break;
-    case 0xAF: BitXor(gb, gb->cpu.A); break;
+    case 0xA0: BitAnd(cpu, cpu->B); break;
+    case 0xA1: BitAnd(cpu, cpu->C); break;
+    case 0xA2: BitAnd(cpu, cpu->D); break;
+    case 0xA3: BitAnd(cpu, cpu->E); break;
+    case 0xA4: BitAnd(cpu, cpu->H); break;
+    case 0xA5: BitAnd(cpu, cpu->L); break;
+    case 0xA7: BitAnd(cpu, cpu->A); break;
+    case 0xB0: BitOr(cpu, cpu->B); break;
+    case 0xB1: BitOr(cpu, cpu->C); break;
+    case 0xB2: BitOr(cpu, cpu->D); break;
+    case 0xB3: BitOr(cpu, cpu->E); break;
+    case 0xB4: BitOr(cpu, cpu->H); break;
+    case 0xB5: BitOr(cpu, cpu->L); break;
+    case 0xB7: BitOr(cpu, cpu->A); break;
+    case 0xA8: BitXor(cpu, cpu->B); break;
+    case 0xA9: BitXor(cpu, cpu->C); break;
+    case 0xAA: BitXor(cpu, cpu->D); break;
+    case 0xAB: BitXor(cpu, cpu->E); break;
+    case 0xAC: BitXor(cpu, cpu->H); break;
+    case 0xAD: BitXor(cpu, cpu->L); break;
+    case 0xAF: BitXor(cpu, cpu->A); break;
 
     // and/or/xor $a, ($hl)
-    case 0xA6: BitAnd(gb, mmu_read(gb, ReadHL(gb))); break;
-    case 0xB6: BitOr(gb, mmu_read(gb, ReadHL(gb))); break;
-    case 0xAE: BitXor(gb, mmu_read(gb, ReadHL(gb))); break;
+    case 0xA6: BitAnd(cpu, mmu_read(gb, ReadHL(cpu))); break;
+    case 0xB6: BitOr(cpu, mmu_read(gb, ReadHL(cpu))); break;
+    case 0xAE: BitXor(cpu, mmu_read(gb, ReadHL(cpu))); break;
 
     // and/or/xor $a, imm8
-    case 0xE6: BitAnd(gb, Imm8(gb)); break;
-    case 0xF6: BitOr(gb, Imm8(gb)); break;
-    case 0xEE: BitXor(gb, Imm8(gb)); break;
+    case 0xE6: BitAnd(cpu, Imm8(gb)); break;
+    case 0xF6: BitOr(cpu, Imm8(gb)); break;
+    case 0xEE: BitXor(cpu, Imm8(gb)); break;
     case 0x07: { // rlca
-        UpdateZNHC(gb, false, false, false, (gb->cpu.A & 0x80));
-        gb->cpu.A = (gb->cpu.A << 1u) | (gb->cpu.A >> 7u);
+        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x80));
+        cpu->A = (cpu->A << 1u) | (cpu->A >> 7u);
     } break;
     case 0x0F: { // rrca
-        UpdateZNHC(gb, false, false, false, (gb->cpu.A & 0x01));
-        gb->cpu.A = (gb->cpu.A >> 1u) | (gb->cpu.A << 7u);
+        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x01));
+        cpu->A = (cpu->A >> 1u) | (cpu->A << 7u);
     } break;
     case 0x17: { // rla
-        bool c = ReadC(gb);
-        UpdateZNHC(gb, false, false, false, (gb->cpu.A & 0x80));
-        gb->cpu.A = (gb->cpu.A << 1u) | (c? 1 : 0);
+        bool c = ReadC(cpu);
+        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x80));
+        cpu->A = (cpu->A << 1u) | (c? 1 : 0);
     } break;
     case 0x1F: { // rra
-        bool c = ReadC(gb);
-        UpdateZNHC(gb, false, false, false, (gb->cpu.A & 0x01));
-        gb->cpu.A = (gb->cpu.A >> 1u) | (c? 0x80 : 0x00);
+        bool c = ReadC(cpu);
+        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x01));
+        cpu->A = (cpu->A >> 1u) | (c? 0x80 : 0x00);
     } break;
     case 0x2F: { // cpl
-        UpdateN(gb, true);
-        UpdateH(gb, true);
-        gb->cpu.A ^= UINT8_MAX;
+        UpdateN(cpu, true);
+        UpdateH(cpu, true);
+        cpu->A ^= UINT8_MAX;
     } break;
     case 0xCB: {
-        cpu_cb_op(gb);
+        cpu_cb_op(gb, cpu);
     } break;
     case 0x03: { // inc $bc
         clock_increment(gb);
-        WriteBC(gb, ReadBC(gb) + 1);
+        WriteBC(cpu, ReadBC(cpu) + 1);
     } break;
     case 0x13: { // inc $de
         clock_increment(gb);
-        WriteDE(gb, ReadDE(gb) + 1);
+        WriteDE(cpu, ReadDE(cpu) + 1);
     } break;
     case 0x23: { // inc $hl
         clock_increment(gb);
-        WriteHL(gb, ReadHL(gb) + 1);
+        WriteHL(cpu, ReadHL(cpu) + 1);
     } break;
     case 0x33: { // inc $sp
         clock_increment(gb);
-        gb->cpu.SP += 1;
+        cpu->SP += 1;
     } break;
     case 0x0B: { // dec $bc
         clock_increment(gb);
-        WriteBC(gb, ReadBC(gb) - 1);
+        WriteBC(cpu, ReadBC(cpu) - 1);
     } break;
     case 0x1B: { // dec $de
         clock_increment(gb);
-        WriteDE(gb, ReadDE(gb) - 1);
+        WriteDE(cpu, ReadDE(cpu) - 1);
     } break;
     case 0x2B: { // dec $hl
         clock_increment(gb);
-        WriteHL(gb, ReadHL(gb) - 1);
+        WriteHL(cpu, ReadHL(cpu) - 1);
     } break;
     case 0x3B: { // dec $sp
         clock_increment(gb);
-        gb->cpu.SP -= 1;
+        cpu->SP -= 1;
     } break;
     case 0x09: { // add $hl, $bc
         clock_increment(gb);
-        WriteHL(gb, Add16(gb, ReadHL(gb), ReadBC(gb)));
+        WriteHL(cpu, Add16(cpu, ReadHL(cpu), ReadBC(cpu)));
     } break;
     case 0x19: { // add $hl, $de
         clock_increment(gb);
-        WriteHL(gb, Add16(gb, ReadHL(gb), ReadDE(gb)));
+        WriteHL(cpu, Add16(cpu, ReadHL(cpu), ReadDE(cpu)));
     } break;
     case 0x29: { // add $hl, $hl
         clock_increment(gb);
-        WriteHL(gb, Add16(gb, ReadHL(gb), ReadHL(gb)));
+        WriteHL(cpu, Add16(cpu, ReadHL(cpu), ReadHL(cpu)));
     } break;
     case 0x39: { // add $hl, $sp
         clock_increment(gb);
-        WriteHL(gb, Add16(gb, ReadHL(gb), gb->cpu.SP));
+        WriteHL(cpu, Add16(cpu, ReadHL(cpu), cpu->SP));
     } break;
     case 0xE8: { // add $sp, imm8i
-        uint16_t ea = gb->cpu.SP + Imm8i(gb);
+        uint16_t ea = cpu->SP + Imm8i(gb);
         clock_increment(gb);
         clock_increment(gb);
-        UpdateZNHC(gb, false, false, (ea & 0xF) < (gb->cpu.SP & 0xF), (ea & 0xFF) < (gb->cpu.SP & 0xFF));
-        gb->cpu.SP = ea;
+        UpdateZNHC(cpu, false, false, (ea & 0xF) < (cpu->SP & 0xF), (ea & 0xFF) < (cpu->SP & 0xFF));
+        cpu->SP = ea;
     } break;
     case 0x34: { // inc ($hl)
-        uint16_t addr = ReadHL(gb);
-        mmu_write(gb, addr, Inc8(gb, mmu_read(gb, addr)));
+        uint16_t addr = ReadHL(cpu);
+        mmu_write(gb, addr, Inc8(cpu, mmu_read(gb, addr)));
     } break;
     case 0x35: { // dec ($hl)
-        uint16_t addr = ReadHL(gb);
-        mmu_write(gb, addr, Dec8(gb, mmu_read(gb, addr)));
+        uint16_t addr = ReadHL(cpu);
+        mmu_write(gb, addr, Dec8(cpu, mmu_read(gb, addr)));
     } break;
-    case 0xE9: gb->cpu.PC = ReadHL(gb); break; // jp $hl
-    case 0xC3: Jump(gb, Imm16(gb)); break; // jp imm16
-    case 0xC2: JumpCond(gb, Imm16(gb), !ReadZ(gb)); break; // jp nz, imm16
-    case 0xCA: JumpCond(gb, Imm16(gb), ReadZ(gb)); break; // jp z, imm16
-    case 0xD2: JumpCond(gb, Imm16(gb), !ReadC(gb)); break; // jp nc, imm16
-    case 0xDA: JumpCond(gb, Imm16(gb), ReadC(gb)); break; // jp c, imm16
-    case 0x18: JumpRel(gb, Imm8i(gb)); break; // jr imm8
-    case 0x20: JumpRelCond(gb, Imm8i(gb), !ReadZ(gb)); break; // jr nz, imm8
-    case 0x28: JumpRelCond(gb, Imm8i(gb), ReadZ(gb)); break; // jr z, imm8i
-    case 0x30: JumpRelCond(gb, Imm8i(gb), !ReadC(gb)); break; // jr nc, imm8i
-    case 0x38: JumpRelCond(gb, Imm8i(gb), ReadC(gb)); break; // jr c, imm8i
-    case 0xC4: CallCond(gb, Imm16(gb), !ReadZ(gb)); break; // call nz, imm16
-    case 0xCC: CallCond(gb, Imm16(gb), ReadZ(gb)); break; // call z, imm16
-    case 0xD4: CallCond(gb, Imm16(gb), !ReadC(gb)); break; // call nc, imm16
-    case 0xDC: CallCond(gb, Imm16(gb), ReadC(gb)); break; // call c, imm16
+    case 0xE9: cpu->PC = ReadHL(cpu); break; // jp $hl
+    case 0xC3: {// jp imm16
+     clock_increment(gb);
+     Jump(cpu, Imm16(gb));
+    } break;
+    case 0xC2: {// jp nz, imm16
+        uint16_t addr = Imm16(gb);
+        clock_increment(gb);
+        if(!ReadZ(cpu)) {
+          Jump(cpu, addr);
+        }
+    } break;
+    case 0xCA: {// jp z, imm16
+        uint16_t addr = Imm16(gb);
+        clock_increment(gb);
+        if(ReadZ(cpu)) {
+          Jump(cpu, addr);
+        }
+    } break;
+    case 0xD2: {// jp nc, imm16
+        uint16_t addr = Imm16(gb);
+        clock_increment(gb);
+        if(!ReadC(cpu)) {
+          Jump(cpu, addr);
+        }
+    } break;
+    case 0xDA: {// jp c, imm16
+        uint16_t addr = Imm16(gb);
+        clock_increment(gb);
+        if(ReadC(cpu)) {
+          Jump(cpu, addr);
+        }
+    } break;
+    case 0x18: {// jr imm8
+      clock_increment(gb);
+      JumpRel(cpu, Imm8i(gb));
+    } break;
+    case 0x20: {// jr nz, imm8
+        uint16_t off = Imm8i(gb);
+        clock_increment(gb);
+        if(!ReadZ(cpu)) {
+          JumpRel(cpu, off);
+        }
+    } break;
+    case 0x28: {// jr z, imm8i
+        uint16_t off = Imm8i(gb);
+        clock_increment(gb);
+        if(ReadZ(cpu)) {
+          JumpRel(cpu, off);
+        }
+    } break;
+    case 0x30: {// jr nc, imm8i
+        uint16_t off = Imm8i(gb);
+        clock_increment(gb);
+        if(!ReadC(cpu)) {
+          JumpRel(cpu, off);
+        }
+    } break;
+    case 0x38: {// jr c, imm8i
+        uint16_t off = Imm8i(gb);
+        clock_increment(gb);
+        if(ReadC(cpu)) {
+          JumpRel(cpu, off);
+        }
+    } break;
+    case 0xC4: { // call nz, imm16
+          uint16_t addr = Imm16(gb);
+          clock_increment(gb);
+        if(!ReadZ(cpu)) {
+          Call(gb, addr);
+        }
+    }  break;
+    case 0xCC: { // call z, imm16
+          uint16_t addr = Imm16(gb);
+          clock_increment(gb);
+        if(ReadZ(cpu)) {
+          Call(gb, addr);
+        }
+    }  break;
+    case 0xD4: { // call nc, imm16
+          uint16_t addr = Imm16(gb);
+          clock_increment(gb);
+        if(!ReadC(cpu)) {
+          Call(gb, addr);
+        }
+    }  break;
+    case 0xDC: { // call c, imm16
+          uint16_t addr = Imm16(gb);
+          clock_increment(gb);
+        if(ReadC(cpu)) {
+          Call(gb, addr);
+        }
+    }  break;
 
-    case 0xCD: Call(gb, Imm16(gb)); break; // call imm16
-    case 0xC7: Call(gb, 0x00); break; // rst 0x00
-    case 0xCF: Call(gb, 0x08); break; // rst 0x08
-    case 0xD7: Call(gb, 0x10); break; // rst 0x10
-    case 0xDF: Call(gb, 0x18); break; // rst 0x18
-    case 0xE7: Call(gb, 0x20); break; // rst 0x20
-    case 0xEF: Call(gb, 0x28); break; // rst 0x28
-    case 0xF7: Call(gb, 0x30); break; // rst 0x30
-    case 0xFF: Call(gb, 0x38); break; // rst 0x38
-    case 0xC9: Ret(gb); break; // ret
-    case 0xC0: RetCond(gb, !ReadZ(gb)); break; // ret nz
-    case 0xC8: RetCond(gb, ReadZ(gb)); break; // ret z
-    case 0xD0: RetCond(gb, !ReadC(gb)); break; // ret nc
-    case 0xD8: RetCond(gb, ReadC(gb)); break; // ret c
-    case 0xD9: { // reti
+    case 0xCD: { // call imm16
+        clock_increment(gb);
+        Call(gb, Imm16(gb));
+    }  break;
+    case 0xC7: { // rst 0x00
+        clock_increment(gb);
+        Call(gb, 0x00);
+    } break;
+    case 0xCF: { // rst 0x08
+        clock_increment(gb);
+        Call(gb, 0x08);
+    }  break;
+    case 0xD7: { // rst 0x10
+        clock_increment(gb);
+        Call(gb, 0x10);
+    }  break;
+    case 0xDF: { // rst 0x18
+        clock_increment(gb);
+        Call(gb, 0x18);
+    }  break;
+    case 0xE7: { // rst 0x20
+        clock_increment(gb);
+        Call(gb, 0x20);
+    }  break;
+    case 0xEF: { // rst 0x28
+        clock_increment(gb);
+        Call(gb, 0x28);
+    }  break;
+    case 0xF7: { // rst 0x30
+        clock_increment(gb);
+        Call(gb, 0x30);
+    }  break;
+    case 0xFF: { // rst 0x38
+        clock_increment(gb);
+        Call(gb, 0x38);
+    }  break;
+    case 0xC9: { // ret
+        clock_increment(gb);
         Ret(gb);
-        gb->cpu.InterruptsEnabled = true;
+    }  break;
+    case 0xC0: { // ret nz
+        clock_increment(gb);
+        if(!ReadZ(cpu)) {
+          clock_increment(gb);
+          Ret(gb);
+        }
+    }  break;
+    case 0xC8: { // ret z
+        clock_increment(gb);
+        if(ReadZ(cpu)) {
+          clock_increment(gb);
+          Ret(gb);
+        }
+    }  break;
+    case 0xD0: { // ret nc
+        clock_increment(gb);
+        if(!ReadC(cpu)) {
+          clock_increment(gb);
+          Ret(gb);
+        }
+    }  break;
+    case 0xD8: { // ret c
+        clock_increment(gb);
+        if(ReadC(cpu)) {
+          clock_increment(gb);
+          Ret(gb);
+        }
+    }  break;
+    case 0xD9: { // reti
+        clock_increment(gb);
+        Ret(gb);
+        cpu->InterruptsEnabled = true;
     } break;
     case 0x00: break; // nop
     case 0xF3: {
-        gb->cpu.InterruptsEnabled = false;
-        gb->cpu.InterruptEnablePending = false;
+        cpu->InterruptsEnabled = false;
+        cpu->InterruptEnablePending = false;
     }
     break; // di
-    case 0xFB: gb->cpu.InterruptEnablePending = true; break; // ei
+    case 0xFB: cpu->InterruptEnablePending = true; break; // ei
     case 0x76: { // halt
-        gb->cpu.Halted = true;
-        if(gb->cpu.InterruptsEnabled == 0) {
-            gb->cpu.HaltBug = true;
+        cpu->Halted = true;
+        if(cpu->InterruptsEnabled == 0) {
+            cpu->HaltBug = true;
         }
     } break;
     case 0x27: { // daa
-        uint16_t a = gb->cpu.A;
-        if(ReadN(gb)) {
-            if(ReadH(gb)) {
+        uint16_t a = cpu->A;
+        if(ReadN(cpu)) {
+            if(ReadH(cpu)) {
                 a -= 0x06;
                 a &= 0xFF;
             }
-            if(ReadC(gb)) {
+            if(ReadC(cpu)) {
                 a -= 0x60;
             }
         }
         else {
-            if((a & 0x0F) > 0x09 || ReadH(gb)) {
+            if((a & 0x0F) > 0x09 || ReadH(cpu)) {
                 a += 0x06;
             }
-            if(a > 0x9F || ReadC(gb)) {
+            if(a > 0x9F || ReadC(cpu)) {
                 a += 0x60;
             }
         }
-        UpdateZ(gb, (a & 0xFF) == 0);
-        UpdateH(gb, false);
-        if(a & 0x100) { UpdateC(gb, true); }
-        gb->cpu.A = a;
+        UpdateZ(cpu, (a & 0xFF) == 0);
+        UpdateH(cpu, false);
+        if(a & 0x100) { UpdateC(cpu, true); }
+        cpu->A = a;
     } break;
     case 0x10: { // stop 0
         // TODO STOP
     } break;
     case 0x37: { // scf
-        UpdateN(gb, false);
-        UpdateH(gb, false);
-        UpdateC(gb, true);
+        UpdateN(cpu, false);
+        UpdateH(cpu, false);
+        UpdateC(cpu, true);
     } break;
     case 0x3F: { // ccf
-        UpdateN(gb, false);
-        UpdateH(gb, false);
-        UpdateC(gb, !ReadC(gb));
+        UpdateN(cpu, false);
+        UpdateH(cpu, false);
+        UpdateC(cpu, !ReadC(cpu));
     } break;
 
     }
@@ -936,114 +1046,115 @@ uint8_t const BootROM[256] = {
     0x21,0x04,0x01,0x11,0xA8,0x00,0x1A,0x13,0xBE,0x20,0xFE,0x23,0x7D,0xFE,0x34,0x20,
     0xF5,0x06,0x19,0x78,0x86,0x23,0x05,0x20,0xFB,0x86,0x20,0xFE,0x3E,0x01,0xE0,0x50
 };
-static void mmu_updateRTC(struct Gameboy* gb)
+static void mmu_updateRTC(struct RTC* rtc)
 {
     time_t now = time(NULL);
     time_t new_time = 0;
-    if((gb->rtc.BaseReg[4] & 0x40) == 0 && now > gb->rtc.BaseTime) {
-        new_time = now - gb->rtc.BaseTime;
+    if((rtc->BaseReg[4] & 0x40) == 0 && now > rtc->BaseTime) {
+        new_time = now - rtc->BaseTime;
     }
-    new_time += (time_t)gb->rtc.BaseReg[0];
-    new_time += (time_t)gb->rtc.BaseReg[1] * 60;
-    new_time += (time_t)gb->rtc.BaseReg[2] * 60 * 60;
-    new_time += (time_t)gb->rtc.BaseReg[3] * 60 * 60 * 24;
-    new_time += (time_t)(gb->rtc.BaseReg[4] & 1u) * 60 * 60 * 24 * 256;
+    new_time += (time_t)rtc->BaseReg[0];
+    new_time += (time_t)rtc->BaseReg[1] * 60;
+    new_time += (time_t)rtc->BaseReg[2] * 60 * 60;
+    new_time += (time_t)rtc->BaseReg[3] * 60 * 60 * 24;
+    new_time += (time_t)(rtc->BaseReg[4] & 1u) * 60 * 60 * 24 * 256;
 
-    gb->rtc.BaseReg[0] = new_time % 60;
+    rtc->BaseReg[0] = new_time % 60;
     new_time /= 60;
-    gb->rtc.BaseReg[1] = new_time % 60;
+    rtc->BaseReg[1] = new_time % 60;
     new_time /= 60;
-    gb->rtc.BaseReg[2] = new_time % 24;
+    rtc->BaseReg[2] = new_time % 24;
     new_time /= 24;
-    gb->rtc.BaseReg[3] = new_time % 256;
+    rtc->BaseReg[3] = new_time % 256;
     new_time /= 256;
     /* Top bit of 9-bit day counter */
-    gb->rtc.BaseReg[4] = (gb->rtc.BaseReg[4] & 0xFE) | (new_time % 2);
+    rtc->BaseReg[4] = (rtc->BaseReg[4] & 0xFE) | (new_time % 2);
     new_time /= 2;
     /* Days overflow bit (sticky) */
-    gb->rtc.BaseReg[4] |= (new_time > 0? 0x80 : 0);
+    rtc->BaseReg[4] |= (new_time > 0? 0x80 : 0);
 
-    gb->rtc.BaseTime = now;
+    rtc->BaseTime = now;
 }
 
-static uint8_t mmu_readRTC(struct Gameboy* gb, uint8_t reg)
+static uint8_t mmu_readRTC(struct RTC* rtc, uint8_t reg)
 {
-    if(reg > 0x0C || !gb->info.HasRTC) {
-        return 0xFF;
-    }
-    else {
-        if(gb->rtc.Latched) {
-            return gb->rtc.LatchedReg[reg - 0x08];
+    // TODO: Re-enable non-rtc games?
+    //if(reg > 0x0C || !gb->info.HasRTC) {
+    //    return 0xFF;
+    //}
+    //else {
+        if(rtc->Latched) {
+            return rtc->LatchedReg[reg - 0x08];
         }
         else {
-            mmu_updateRTC(gb);
-            return gb->rtc.BaseReg[reg - 0x08];
+            mmu_updateRTC(rtc);
+            return rtc->BaseReg[reg - 0x08];
         }
-    }
+    //}
 }
 
 static void mmu_writeRTC(struct Gameboy* gb, uint8_t reg, uint8_t val)
 {
     if(reg <= 0x0C) {
-        mmu_updateRTC(gb);
-        gb->rtc.BaseReg[reg - 0x08] = val;
+        mmu_updateRTC(&(gb->mem.rtc));
+        gb->mem.rtc.BaseReg[reg - 0x08] = val;
     }
 }
-static uint8_t mmu_readBankedROM(struct Gameboy* gb, unsigned int relativeAddress)
+static uint8_t mmu_readBankedROM(struct Memory* mem, unsigned int relativeAddress)
 {
-    unsigned int cartAddr = (gb->mem.MBCROMBank * 16384) + relativeAddress;
-    return gb->mem.CartROM[cartAddr % gb->mem.CartROMSize];
+    unsigned int cartAddr = (mem->MBCROMBank * 16384) + relativeAddress;
+    return mem->CartROM[cartAddr % mem->CartROMSize];
 }
 
-static uint8_t mmu_readBankedRAM(struct Gameboy* gb, unsigned int relativeAddress)
+static uint8_t mmu_readBankedRAM(struct Memory* mem, unsigned int relativeAddress)
 {
-    if(gb->mem.MBCModel == Cart_MBC3 && gb->mem.MBCRAMBank >= Cart_MBC3_RTCBase) {
-        return mmu_readRTC(gb, gb->mem.MBCRAMBank);
+    if(mem->MBCModel == Cart_MBC3 && mem->MBCRAMBank >= Cart_MBC3_RTCBase) {
+        return mmu_readRTC(&(mem->rtc), mem->MBCRAMBank);
     }
     else {
-        unsigned int cartAddr = (gb->mem.MBCRAMBank * 8192) + relativeAddress;
-        if(gb->mem.CartRAMSize && gb->mem.CartRAMBankEnabled) {
-            return gb->mem.CartRAM[cartAddr % gb->mem.CartRAMSize];
+        unsigned int cartAddr = (mem->MBCRAMBank * 8192) + relativeAddress;
+        if(mem->CartRAMSize && mem->CartRAMBankEnabled) {
+            return mem->CartRAM[cartAddr % mem->CartRAMSize];
         }
         else {
             return 0xFF;
         }
     }
 }
-static uint8_t mmu_readDirect(struct Gameboy* gb, uint16_t addr) {
-    if ((addr <= 0x00FF) && gb->mem.BootROMEnabled) {
+static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
+    if ((addr <= 0x00FF) && mem->BootROMEnabled) {
         return BootROM[addr];
     } else if (addr < 0x4000) {
         /* 16K - ROM Bank #0 (fixed) */
-        return gb->mem.CartROM[addr];
+        return mem->CartROM[addr];
     } else if (addr < 0x8000) {
         /* 16K - Banked ROM area */
-        return mmu_readBankedROM(gb, addr - 0x4000);
+        return mmu_readBankedROM(mem, addr - 0x4000);
     } else if (addr < 0xA000) {
         /* Video RAM */
-        return gb->mem.VideoRAM[addr - 0x8000];
+        return mem->VideoRAM[addr - 0x8000];
     } else if (addr < 0xC000) {
         /* 8K - Banked RAM Area */
-        return mmu_readBankedRAM(gb, addr - 0xA000);
+        return mmu_readBankedRAM(mem, addr - 0xA000);
     } else if (addr < 0xE000) {
         /* 8K - Internal RAM */
-        return gb->mem.WorkRAM[addr - 0xC000];
+        return mem->WorkRAM[addr - 0xC000];
     } else if (addr < 0xFE00) {
         /* Mirror of internal RAM */
-        return gb->mem.WorkRAM[addr - 0xE000];
+        return mem->WorkRAM[addr - 0xE000];
     } else if (addr < 0xFE9F) {
         /* OAM */
-        return gb->mem.OAM[addr - 0xFE00];
+        return mem->OAM[addr - 0xFE00];
     } else if (addr < 0xFF00) {
         /* Empty */
         return 0x00;
     } else if (addr < 0xFF80) {
         /* IO registers */
-        return gb->mem.IO[addr - 0xFF00];// | IOUnusedBits[addr - 0xFF00];
+        return mem->IO[addr - 0xFF00];// | IOUnusedBits[addr - 0xFF00];
     } else if(addr < 0xFFFF) {
-        return gb->mem.HighRAM[addr - 0xFF80];
+        return mem->HighRAM[addr - 0xFF80];
     } else {
-        return gb->mem.InterruptEnable;
+        return mem->InterruptEnable;
     }
 }
 
@@ -1136,7 +1247,7 @@ static uint8_t mmu_read(struct Gameboy* gb, int addr) {
         return 0xFF;
     }
     else {
-        return mmu_readDirect(gb, addr);
+        return mmu_readDirect(&(gb->mem), addr);
     }
 }
 
@@ -1160,15 +1271,15 @@ static void mmu_writeDirect(struct Gameboy* gb, uint16_t addr, uint8_t value)
             //<< mbc1 model selection >>
         }
         else if(gb->mem.MBCModel == Cart_MBC3) {
-            if(value == 0x00 && gb->rtc.Latched) {
-                gb->rtc.Latched = false;
+            if(value == 0x00 && gb->mem.rtc.Latched) {
+                gb->mem.rtc.Latched = false;
             }
-            else if(value == 0x01 && !gb->rtc.Latched) {
-                mmu_updateRTC(gb);
+            else if(value == 0x01 && !gb->mem.rtc.Latched) {
+                mmu_updateRTC(&(gb->mem.rtc));
                 for(unsigned i = 0; i < 5; i += 1) {
-                    gb->rtc.LatchedReg[i] = gb->rtc.BaseReg[i];
+                    gb->mem.rtc.LatchedReg[i] = gb->mem.rtc.BaseReg[i];
                 }
-                gb->rtc.Latched = true;
+                gb->mem.rtc.Latched = true;
             }
         }
     } else if (addr < 0xA000) {
@@ -1207,10 +1318,10 @@ static void mmu_writeDirect(struct Gameboy* gb, uint16_t addr, uint8_t value)
                     gb->mem.IO[IO_TimerCounter] = value;
                 }
             case IO_TimerControl:
-                clock_updateTimerControl(gb, value);
+                clock_updateTimerControl(&(gb->clock), &(gb->mem), value);
                 break;
             case IO_Divider:
-                clock_countChange(gb, 0);
+                clock_countChange(&(gb->clock), &(gb->mem), 0);
                 break;
             case IO_InterruptFlag:
                 /* Top 5 bits of IF always read 1s */
@@ -1268,32 +1379,34 @@ static void mmu_write(struct Gameboy* gb, int addr, uint8_t value) {
 
 uint8_t gameboy_read(struct Gameboy* gb, uint16_t addr)
 {
-    return mmu_readDirect(gb, addr);
+    return mmu_readDirect(&(gb->mem), addr);
 }
 
 void gameboy_write(struct Gameboy* gb, uint16_t addr, uint8_t value)
 {
     mmu_writeDirect(gb, addr, value);
 }
-static void dma_update(struct Gameboy* gb)
+
+static void dma_update(struct DMA* dma, struct Memory* mem)
 {
-    if(gb->dma.PendingSource) {
-        if(!gb->dma.DelayStart) {
-            gb->dma.Source = gb->dma.PendingSource << 8;
-            gb->dma.PendingSource = 0;
+    if(dma->PendingSource) {
+        if(!dma->DelayStart) {
+            dma->Source = dma->PendingSource << 8;
+            dma->PendingSource = 0;
         }
-        gb->dma.DelayStart = false;
+        dma->DelayStart = false;
     }
 
-    if(gb->dma.Source && (gb->dma.Source & 0xFF) < 160) {
-        gb->dma.Active = true;
-        gb->mem.OAM[gb->dma.Source & 0xFF] = mmu_readDirect(gb, gb->dma.Source);
-        gb->dma.Source += 1;
+    if(dma->Source && (dma->Source & 0xFF) < 160) {
+        dma->Active = true;
+        mem->OAM[dma->Source & 0xFF] = mmu_readDirect(mem, dma->Source);
+        dma->Source += 1;
     }
     else {
-        gb->dma.Active = false;
+        dma->Active = false;
     }
 }
+
 static uint8_t video_linePixel(uint8_t const line[2], unsigned x)
 {
     return (((line[0] << x) & 0x80) >> 7) | (((line[1] << x) & 0x80) >> 6);
@@ -1529,18 +1642,18 @@ void input_setDown(struct Gameboy* gb, int button)
         gb->mem.IO[IO_InterruptFlag] |= Interrupt_Joypad;
     }
 }
-void input_update(struct Gameboy* gb)
+void input_update(struct Memory* mem, struct Buttons* buttons)
 {
-    uint8_t invButtons = ~gb->buttons.Pressed;
-    uint8_t joyReg = gb->mem.IO[IO_Joypad];
+    uint8_t invButtons = ~buttons->Pressed;
+    uint8_t joyReg = mem->IO[IO_Joypad];
     if((joyReg & 0x20) != 0) { /* Directional keys */
-        gb->mem.IO[IO_Joypad] = ((joyReg & 0xF0) | ((invButtons >> 4u) & 0x0F));
+        mem->IO[IO_Joypad] = ((joyReg & 0xF0) | ((invButtons >> 4u) & 0x0F));
     }
     else if((joyReg & 0x10) != 0) { /* Buttons */
-        gb->mem.IO[IO_Joypad] = ((joyReg & 0xF0) | (invButtons & 0x0F));
+        mem->IO[IO_Joypad] = ((joyReg & 0xF0) | (invButtons & 0x0F));
     }
     else if(joyReg == 3) { /* Model check - 0xFX == classic gameboy */
-        gb->mem.IO[IO_Joypad] = 0xFF;
+        mem->IO[IO_Joypad] = 0xFF;
     }
 }
 void gameboy_setButtonState(struct Gameboy* gb, int button, bool down)
@@ -1561,9 +1674,9 @@ char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
     gb->info.HasRumble = false;
     gb->mem.CartRAMSize = 0;
     gb->mem.CartROMSize = 0;
-    gb->rtc.BaseTime = time(NULL);
+    gb->mem.rtc.BaseTime = time(NULL);
     for(unsigned i = 0; i < 5; i += 1) {
-        gb->rtc.BaseReg[i] = 0x00;
+        gb->mem.rtc.BaseReg[i] = 0x00;
     }
     {
         uint8_t headerChecksum = 0;
@@ -1741,7 +1854,7 @@ char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
 }
 int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
 {
-    gb->TotalCycles = 0;
+    gb->cpu.TotalCycles = 0;
     gb->clock.CycleCount = 0;
     gb->clock.TimerOverflow = false;
     gb->clock.TimerLoading = false;
@@ -1825,14 +1938,6 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
     gb->lcd.FrameProgress = 0;
     return 0;
 }
-int gameboy_step(struct Gameboy* gb)
-{
-    input_update(gb);
-    cpu_handleInterrupts(gb);
-    cpu_step(gb);
-
-    return 0;
-}
 
 void gameboy_free(struct Gameboy* gb) {
   free(gb);
@@ -1861,22 +1966,48 @@ int gameboy_frame_stride() {
       return 160*sizeof(uint32_t);
 }
 
-// Returns pointer to frame pixels
-void* gameboy_do_frame(struct Gameboy* gb) {
-  while(true) {
-    gameboy_step(gb);
-    if(gb->lcd.NewFrame) {
-      gb->lcd.NewFrame = false;
-      for(unsigned int y = 0; y < 144; y += 1) {
-        for(unsigned int x = 0; x < 160; x += 1) {
-          uint8_t pixel = gb->lcd.Buffer[x][y];
-          gb->lcd.Frame[y][x] = palette[pixel & 0x03];
-        }
+void* updateFrameBuffer(struct LCD* lcd) {
+  if(lcd->NewFrame) {
+    lcd->NewFrame = false;
+    for(unsigned int y = 0; y < 144; y += 1) {
+      for(unsigned int x = 0; x < 160; x += 1) {
+        uint8_t pixel = lcd->Buffer[x][y];
+        lcd->Frame[y][x] = palette[pixel & 0x03];
       }
-      return gb->lcd.Frame;
     }
+    return lcd->Frame;
   }
+
+  return NULL;
 }
+
+struct Memory* getMemory(struct Gameboy* gb) {
+  return &(gb->mem);
+}
+
+struct Buttons* getButtons(struct Gameboy* gb) {
+  return &(gb->buttons);
+}
+
+struct Cpu* getCpu(struct Gameboy* gb) {
+  return &(gb->cpu);
+}
+
+struct LCD* getLCD(struct Gameboy* gb) {
+  return &(gb->lcd);
+}
+
+// // Returns pointer to frame pixels
+// void* gameboy_do_frame(struct Gameboy* gb) {
+//   void* pixels = NULL;
+//   while(true) {
+//     gameboy_step(gb);
+//     pixels = updateFrameBuffer(gb);
+//     if(pixels != NULL) {
+//       return pixels;
+//     }
+//   }
+// }
 
 // Returns size of cartridge RAM
 unsigned int gameboy_cart_ram_size(struct Gameboy* gb) {
