@@ -164,7 +164,7 @@ static void clock_countChange(struct Clock *clock, struct Memory *mem, uint16_t 
     clock->CycleCount = new_value;
     mem->IO[IO_Divider] = new_value >> 8u;
 }
-static inline uint8_t Imm8(struct Gameboy* gb)
+uint8_t Imm8(struct Gameboy* gb)
 {
     gb->cpu.PC += 1;
     return mmu_read(gb, gb->cpu.PC - 1);
@@ -435,88 +435,10 @@ void cpu_handleInterrupts(struct Gameboy* gb, struct Cpu* cpu, struct Memory* me
     }
 }
 static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr);
-void cpu_step(struct Gameboy* gb, struct Cpu* cpu)
+void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
 {
-    if(cpu->Halted) {
-        clock_increment(gb);
-        return;
-    }
-
-    if(cpu->InterruptEnablePending) {
-        cpu->InterruptsEnabled = true;
-        cpu->InterruptEnablePending = false;
-    }
-
-    uint8_t const opcode = Imm8(gb);
-
-    if(cpu->HaltBug) {
-        cpu->HaltBug = false;
-        cpu->PC -= 1;
-    }
 
     switch(opcode) {
-    // ld $b, $reg8
-    case 0x40: cpu->B = cpu->B; break;
-    case 0x41: cpu->B = cpu->C; break;
-    case 0x42: cpu->B = cpu->D; break;
-    case 0x43: cpu->B = cpu->E; break;
-    case 0x44: cpu->B = cpu->H; break;
-    case 0x45: cpu->B = cpu->L; break;
-    case 0x47: cpu->B = cpu->A; break;
-
-    // ld $c, $reg8
-    case 0x48: cpu->C = cpu->B; break;
-    case 0x49: cpu->C = cpu->C; break;
-    case 0x4A: cpu->C = cpu->D; break;
-    case 0x4B: cpu->C = cpu->E; break;
-    case 0x4C: cpu->C = cpu->H; break;
-    case 0x4D: cpu->C = cpu->L; break;
-    case 0x4F: cpu->C = cpu->A; break;
-
-    // ld $d, $reg8
-    case 0x50: cpu->D = cpu->B; break;
-    case 0x51: cpu->D = cpu->C; break;
-    case 0x52: cpu->D = cpu->D; break;
-    case 0x53: cpu->D = cpu->E; break;
-    case 0x54: cpu->D = cpu->H; break;
-    case 0x55: cpu->D = cpu->L; break;
-    case 0x57: cpu->D = cpu->A; break;
-
-    // ld $e, $reg8
-    case 0x58: cpu->E = cpu->B; break;
-    case 0x59: cpu->E = cpu->C; break;
-    case 0x5A: cpu->E = cpu->D; break;
-    case 0x5B: cpu->E = cpu->E; break;
-    case 0x5C: cpu->E = cpu->H; break;
-    case 0x5D: cpu->E = cpu->L; break;
-    case 0x5F: cpu->E = cpu->A; break;
-
-    // ld $h, $reg8
-    case 0x60: cpu->H = cpu->B; break;
-    case 0x61: cpu->H = cpu->C; break;
-    case 0x62: cpu->H = cpu->D; break;
-    case 0x63: cpu->H = cpu->E; break;
-    case 0x64: cpu->H = cpu->H; break;
-    case 0x65: cpu->H = cpu->L; break;
-    case 0x67: cpu->H = cpu->A; break;
-
-    // ld $l, $reg8
-    case 0x68: cpu->L = cpu->B; break;
-    case 0x69: cpu->L = cpu->C; break;
-    case 0x6A: cpu->L = cpu->D; break;
-    case 0x6B: cpu->L = cpu->E; break;
-    case 0x6C: cpu->L = cpu->H; break;
-    case 0x6D: cpu->L = cpu->L; break;
-    case 0x6F: cpu->L = cpu->A; break;
-
-    // ld $a, $reg8
-    case 0x78: cpu->A = cpu->B; break;
-    case 0x79: cpu->A = cpu->C; break;
-    case 0x7A: cpu->A = cpu->D; break;
-    case 0x7B: cpu->A = cpu->E; break;
-    case 0x7C: cpu->A = cpu->H; break;
-    case 0x7D: cpu->A = cpu->L; break;
-    case 0x7F: cpu->A = cpu->A; break;
     // ld $reg8, ($hl)
     case 0x46: cpu->B = mmu_read(gb, ReadHL(cpu)); break;
     case 0x4E: cpu->C = mmu_read(gb, ReadHL(cpu)); break;
@@ -2008,33 +1930,9 @@ struct Cpu* getCpu(struct Gameboy* gb) {
   return &(gb->cpu);
 }
 
-void unhaltCpu(struct Cpu* cpu) {
-  cpu->Halted = false;
-}
-
-bool cpuIE(struct Cpu* cpu) {
-  return cpu->InterruptsEnabled;
-}
-
-void cpuDisableInterrupts(struct Cpu* cpu) {
-  cpu->InterruptsEnabled = false;
-}
-
 struct LCD* getLCD(struct Gameboy* gb) {
   return &(gb->lcd);
 }
-
-// // Returns pointer to frame pixels
-// void* gameboy_do_frame(struct Gameboy* gb) {
-//   void* pixels = NULL;
-//   while(true) {
-//     gameboy_step(gb);
-//     pixels = updateFrameBuffer(gb);
-//     if(pixels != NULL) {
-//       return pixels;
-//     }
-//   }
-// }
 
 // Returns size of cartridge RAM
 unsigned int gameboy_cart_ram_size(struct Gameboy* gb) {
