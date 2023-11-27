@@ -170,7 +170,7 @@ uint8_t Imm8(struct Gameboy* gb)
     return mmu_read(gb, gb->cpu.PC - 1);
 }
 
-static inline int8_t Imm8i(struct Gameboy* gb)
+int8_t Imm8i(struct Gameboy* gb)
 {
     return (int8_t)Imm8(gb);
 }
@@ -414,26 +414,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
 {
 
     switch(opcode) {
-    // ld $reg16, imm16
-    case 0x01: WriteBC(cpu, Imm16(gb)); break;
-    case 0x11: WriteDE(cpu, Imm16(gb)); break;
-    case 0x21: WriteHL(cpu, Imm16(gb)); break;
-    case 0x31: cpu->SP = Imm16(gb); break;
-    case 0x08: { // ld (imm16), $sp
-        uint16_t addr = Imm16(gb);
-        mmu_write(gb, addr, (cpu->SP & 0xFF));
-        mmu_write(gb, addr + 1, (cpu->SP >> 8u));
-    } break;
-    case 0xF9: // ld $sp, $hl
-        clock_increment(gb);
-        cpu->SP = ReadHL(cpu);
-        break;
-    case 0xF8: { // ld $hl, $sp + imm8
-        uint16_t ea = cpu->SP + Imm8i(gb);
-        clock_increment(gb);
-        WriteHL(cpu, ea);
-        UpdateZNHC(cpu, false, false, (ea & 0xF) < (cpu->SP & 0xF), (ea & 0xFF) < (cpu->SP & 0xFF));
-    } break;
     // pop $reg16
     case 0xC1: WriteBC(cpu, Pop16(gb)); break;
     case 0xD1: WriteDE(cpu, Pop16(gb)); break;
