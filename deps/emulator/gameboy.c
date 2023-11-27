@@ -175,7 +175,7 @@ static inline int8_t Imm8i(struct Gameboy* gb)
     return (int8_t)Imm8(gb);
 }
 
-static inline uint16_t Imm16(struct Gameboy* gb)
+uint16_t Imm16(struct Gameboy* gb)
 {
     uint8_t const lo = Imm8(gb);
     uint8_t const hi = Imm8(gb);
@@ -409,74 +409,11 @@ void Ret(struct Gameboy* gb)
     Jump(&(gb->cpu), Pop16(gb));
 }
 
-void cpu_handleInterrupts(struct Gameboy* gb, struct Cpu* cpu, struct Memory* mem)
-{
-    uint8_t iflag = mem->IO[IO_InterruptFlag];
-    uint8_t irqs = (mem->InterruptEnable & iflag & Interrupt_Mask);
-    if(irqs) {
-        cpu->Halted = false;
-        if(cpu->InterruptsEnabled) {
-            assert(!cpu->InterruptEnablePending);
-            // handle interrupts in priority order
-            for(unsigned int i = 0; i < 5; i += 1) {
-                uint8_t const bit = 1u << i;
-                if(irqs & bit) {
-                    cpu->InterruptsEnabled = false;
-                    clock_increment(gb);
-                    clock_increment(gb);
-                    clock_increment(gb);
-                    Call(gb, 0x40 + (i * 8));
-                    iflag &= ~bit;
-                    break;
-                }
-            }
-            mem->IO[IO_InterruptFlag] = iflag;
-        }
-    }
-}
 static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr);
 void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
 {
 
     switch(opcode) {
-    case 0x36: mmu_write(gb, ReadHL(cpu), Imm8(gb)); break; // ld ($hl), imm8
-    // ld $a, ($reg16)
-    case 0x0A: cpu->A = mmu_read(gb, ReadBC(cpu)); break;
-    case 0x1A: cpu->A = mmu_read(gb, ReadDE(cpu)); break;
-
-    // ld ($reg16), $a
-    case 0x02: mmu_write(gb, ReadBC(cpu), cpu->A); break;
-    case 0x12: mmu_write(gb, ReadDE(cpu), cpu->A); break;
-    case 0xEA: mmu_write(gb, Imm16(gb), cpu->A); break; // ld (imm16), $a
-    case 0xFA: cpu->A = mmu_read(gb, Imm16(gb)); break; // ld $a, (imm16)
-    case 0x22: // ld ($hl+), $a
-        mmu_write(gb, ReadHL(cpu), cpu->A);
-        WriteHL(cpu, ReadHL(cpu) + 1);
-        break;
-    case 0x2A: // ld $a, ($hl+)
-        cpu->A = mmu_read(gb, ReadHL(cpu));
-        WriteHL(cpu, ReadHL(cpu) + 1);
-        break;
-    case 0x32: // ld ($hl-), $a
-        mmu_write(gb, ReadHL(cpu), cpu->A);
-        WriteHL(cpu, ReadHL(cpu) - 1);
-        break;
-    case 0x3A: // ld $a, ($hl-)
-        cpu->A = mmu_read(gb, ReadHL(cpu));
-        WriteHL(cpu, ReadHL(cpu) - 1);
-        break;
-    case 0xE0: mmu_write(gb, 0xFF00 + Imm8(gb), cpu->A); break; // ld (0xFF00 + imm8), $a
-    case 0xE2: mmu_write(gb, 0xFF00 + cpu->C, cpu->A); break; // ld (0xFF00 + $c), $a
-    case 0xF0: cpu->A = mmu_read(gb, 0xFF00 + Imm8(gb)); break; // ld $a, (0xFF00 + imm8)
-    case 0xF2: cpu->A = mmu_read(gb, 0xFF00 + cpu->C); break; // ld $a, (0xFF00 + $c)
-    // ld $reg8, imm8
-    case 0x06: cpu->B = Imm8(gb); break;
-    case 0x0E: cpu->C = Imm8(gb); break;
-    case 0x16: cpu->D = Imm8(gb); break;
-    case 0x1E: cpu->E = Imm8(gb); break;
-    case 0x26: cpu->H = Imm8(gb); break;
-    case 0x2E: cpu->L = Imm8(gb); break;
-    case 0x3E: cpu->A = Imm8(gb); break;
     // ld $reg16, imm16
     case 0x01: WriteBC(cpu, Imm16(gb)); break;
     case 0x11: WriteDE(cpu, Imm16(gb)); break;
