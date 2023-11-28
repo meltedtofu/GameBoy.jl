@@ -282,6 +282,14 @@ function Sub8!(cpu::Cpu, v₀::UInt8, v₁::UInt8, carry::Bool)::UInt8
     res
 end
 
+function Cp!(cpu::Cpu, v₀::UInt8, v₁::UInt8)::Nothing
+    Z!(cpu, v₀ == v₁)
+    N!(cpu, true)
+    H!(cpu, (v₀ & 0x0f) - (v₁ & 0x0f) > 0x0f)
+    C!(cpu, v₀ < v₁)
+    nothing
+end
+
 function Inc8!(cpu::Cpu, v::UInt8)::UInt8
     N!(cpu, false)
     H!(cpu, (v & 0x0f) == 0x0f)
@@ -702,6 +710,25 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         cpu.A = Sub8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0x9f
         cpu.A = Sub8!(cpu, cpu.A, cpu.A, C(cpu))
+    elseif opcode == 0xb8
+        Cp!(cpu, cpu.A, cpu.B)
+    elseif opcode == 0xb9
+        Cp!(cpu, cpu.A, cpu.C)
+    elseif opcode == 0xba
+        Cp!(cpu, cpu.A, cpu.D)
+    elseif opcode == 0xbb
+        Cp!(cpu, cpu.A, cpu.E)
+    elseif opcode == 0xbc
+        Cp!(cpu, cpu.A, cpu.H)
+    elseif opcode == 0xbd
+        Cp!(cpu, cpu.A, cpu.L)
+    elseif opcode == 0xbe
+        addr = HL(cpu)
+        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        cpu = unsafe_load(cpup)
+        Cp!(cpu, cpu.A, val)
+    elseif opcode == 0xbf
+        Cp!(cpu, cpu.A, cpu.A)
     elseif opcode == 0xc1
         val = Pop16!(gb, cpup)
         cpu = unsafe_load(cpup)
@@ -814,6 +841,10 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
         cpu = unsafe_load(cpup)
         cpu.A = val
+    elseif opcode == 0xfe
+        val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
+        cpu = unsafe_load(cpup)
+        Cp!(cpu, cpu.A, val)
     end
 
     unsafe_store!(cpup, cpu)

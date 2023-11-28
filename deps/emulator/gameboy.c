@@ -421,18 +421,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
         clock_increment(gb);
         Push16(gb, ReadAF(cpu));
         break;
-    // cp $a, reg8
-    case 0xB8: Sub8(cpu, cpu->A, cpu->B, false); break;
-    case 0xB9: Sub8(cpu, cpu->A, cpu->C, false); break;
-    case 0xBA: Sub8(cpu, cpu->A, cpu->D, false); break;
-    case 0xBB: Sub8(cpu, cpu->A, cpu->E, false); break;
-    case 0xBC: Sub8(cpu, cpu->A, cpu->H, false); break;
-    case 0xBD: Sub8(cpu, cpu->A, cpu->L, false); break;
-    case 0xBF: Sub8(cpu, cpu->A, cpu->A, false); break;
-    // cp $a, ($hl)
-    case 0xBE: Sub8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), false); break;
-    // cp $a, imm8
-    case 0xFE: Sub8(cpu, cpu->A, Imm8(gb), false); break;
     // and/or/xor $a, $reg8
     case 0xA0: BitAnd(cpu, cpu->B); break;
     case 0xA1: BitAnd(cpu, cpu->C); break;
