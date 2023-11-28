@@ -426,22 +426,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
     case 0xCB: {
         cpu_cb_op(gb, cpu);
     } break;
-    case 0xE8: { // add $sp, imm8i
-        uint16_t ea = cpu->SP + Imm8i(gb);
-        clock_increment(gb);
-        clock_increment(gb);
-        UpdateZNHC(cpu, false, false, (ea & 0xF) < (cpu->SP & 0xF), (ea & 0xFF) < (cpu->SP & 0xFF));
-        cpu->SP = ea;
-    } break;
-    case 0x34: { // inc ($hl)
-        uint16_t addr = ReadHL(cpu);
-        mmu_write(gb, addr, Inc8(cpu, mmu_read(gb, addr)));
-    } break;
-    case 0x35: { // dec ($hl)
-        uint16_t addr = ReadHL(cpu);
-        mmu_write(gb, addr, Dec8(cpu, mmu_read(gb, addr)));
-    } break;
-    case 0xE9: cpu->PC = ReadHL(cpu); break; // jp $hl
     case 0xC3: {// jp imm16
      clock_increment(gb);
      Jump(cpu, Imm16(gb));
