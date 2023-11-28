@@ -421,38 +421,7 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
         clock_increment(gb);
         Push16(gb, ReadAF(cpu));
         break;
-    // and/or/xor $a, $reg8
-    case 0xA0: BitAnd(cpu, cpu->B); break;
-    case 0xA1: BitAnd(cpu, cpu->C); break;
-    case 0xA2: BitAnd(cpu, cpu->D); break;
-    case 0xA3: BitAnd(cpu, cpu->E); break;
-    case 0xA4: BitAnd(cpu, cpu->H); break;
-    case 0xA5: BitAnd(cpu, cpu->L); break;
-    case 0xA7: BitAnd(cpu, cpu->A); break;
-    case 0xB0: BitOr(cpu, cpu->B); break;
-    case 0xB1: BitOr(cpu, cpu->C); break;
-    case 0xB2: BitOr(cpu, cpu->D); break;
-    case 0xB3: BitOr(cpu, cpu->E); break;
-    case 0xB4: BitOr(cpu, cpu->H); break;
-    case 0xB5: BitOr(cpu, cpu->L); break;
-    case 0xB7: BitOr(cpu, cpu->A); break;
-    case 0xA8: BitXor(cpu, cpu->B); break;
-    case 0xA9: BitXor(cpu, cpu->C); break;
-    case 0xAA: BitXor(cpu, cpu->D); break;
-    case 0xAB: BitXor(cpu, cpu->E); break;
-    case 0xAC: BitXor(cpu, cpu->H); break;
-    case 0xAD: BitXor(cpu, cpu->L); break;
-    case 0xAF: BitXor(cpu, cpu->A); break;
 
-    // and/or/xor $a, ($hl)
-    case 0xA6: BitAnd(cpu, mmu_read(gb, ReadHL(cpu))); break;
-    case 0xB6: BitOr(cpu, mmu_read(gb, ReadHL(cpu))); break;
-    case 0xAE: BitXor(cpu, mmu_read(gb, ReadHL(cpu))); break;
-
-    // and/or/xor $a, imm8
-    case 0xE6: BitAnd(cpu, Imm8(gb)); break;
-    case 0xF6: BitOr(cpu, Imm8(gb)); break;
-    case 0xEE: BitXor(cpu, Imm8(gb)); break;
     case 0x07: { // rlca
         UpdateZNHC(cpu, false, false, false, (cpu->A & 0x80));
         cpu->A = (cpu->A << 1u) | (cpu->A >> 7u);

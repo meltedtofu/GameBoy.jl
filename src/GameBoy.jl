@@ -310,6 +310,36 @@ function Dec8!(cpu::Cpu, v::UInt8)::UInt8
     v == 0x00 ? 0xff : v - 0x01
 end
 
+function And!(cpu::Cpu, v::UInt8)::Nothing
+    cpu.A &= v
+    ZNHC!(cpu,
+          cpu.A == 0,
+          false,
+          true,
+          false)
+    nothing
+end
+
+function Or!(cpu::Cpu, v::UInt8)::Nothing
+    cpu.A |= v
+    ZNHC!(cpu,
+          cpu.A == 0,
+          false,
+          false,
+          false)
+    nothing
+end
+
+function Xor!(cpu::Cpu, v::UInt8)::Nothing
+    cpu.A = cpu.A ⊻ v
+    ZNHC!(cpu,
+          cpu.A == 0,
+          false,
+          false,
+          false)
+    nothing
+end
+
 function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
     # NOTE: the mo for this port is top down. move it over section by section and then ccall the library with the rest of the lines.
 
@@ -710,6 +740,63 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         cpu.A = Sub8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0x9f
         cpu.A = Sub8!(cpu, cpu.A, cpu.A, C(cpu))
+    elseif opcode == 0xa0
+        And!(cpu, cpu.B)
+    elseif opcode == 0xa1
+        And!(cpu, cpu.C)
+    elseif opcode == 0xa2
+        And!(cpu, cpu.D)
+    elseif opcode == 0xa3
+        And!(cpu, cpu.E)
+    elseif opcode == 0xa4
+        And!(cpu, cpu.H)
+    elseif opcode == 0xa5
+        And!(cpu, cpu.L)
+    elseif opcode == 0xa6
+        addr = HL(cpu)
+        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        cpu = unsafe_load(cpup)
+        And!(cpu, val)
+    elseif opcode == 0xa7
+        And!(cpu, cpu.A)
+    elseif opcode == 0xa8
+        Xor!(cpu, cpu.B)
+    elseif opcode == 0xa9
+        Xor!(cpu, cpu.C)
+    elseif opcode == 0xaa
+        Xor!(cpu, cpu.D)
+    elseif opcode == 0xab
+        Xor!(cpu, cpu.E)
+    elseif opcode == 0xac
+        Xor!(cpu, cpu.H)
+    elseif opcode == 0xad
+        Xor!(cpu, cpu.L)
+    elseif opcode == 0xae
+        addr = HL(cpu)
+        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        cpu = unsafe_load(cpup)
+        Xor!(cpu, val)
+    elseif opcode == 0xaf
+        Xor!(cpu, cpu.A)
+    elseif opcode == 0xb0
+        Or!(cpu, cpu.B)
+    elseif opcode == 0xb1
+        Or!(cpu, cpu.C)
+    elseif opcode == 0xb2
+        Or!(cpu, cpu.D)
+    elseif opcode == 0xb3
+        Or!(cpu, cpu.E)
+    elseif opcode == 0xb4
+        Or!(cpu, cpu.H)
+    elseif opcode == 0xb5
+        Or!(cpu, cpu.L)
+    elseif opcode == 0xb6
+        addr = HL(cpu)
+        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        cpu = unsafe_load(cpup)
+        Or!(cpu, val)
+    elseif opcode == 0xb7
+        Or!(cpu, cpu.A)
     elseif opcode == 0xb8
         Cp!(cpu, cpu.A, cpu.B)
     elseif opcode == 0xb9
@@ -792,12 +879,22 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         unsafe_store!(cpup, cpu)
         Push16!(gb, cpup, val)
         cpu = unsafe_load(cpup)
+    elseif opcode == 0xe6
+        addr = HL(cpu)
+        val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
+        cpu = unsafe_load(cpup)
+        And!(cpu, val)
     elseif opcode == 0xea
         addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         val = cpu.A
         ccall((:mmu_write, gblib), Cvoid, (Ptr{Cvoid}, UInt16, UInt8), gb.g, addr, val)
         cpu = unsafe_load(cpup)
+    elseif opcode == 0xee
+        addr = HL(cpu)
+        val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
+        cpu = unsafe_load(cpup)
+        Xor!(cpu, val)
     elseif opcode == 0xf0
         offset = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         addr = 0xff00 + offset
@@ -820,6 +917,11 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
     #    unsafe_store!(cpup, cpu)
     #    Push16!(gb, cpup, val)
     #    cpu = unsafe_load(cpup)
+    elseif opcode == 0xf6
+        addr = HL(cpu)
+        val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
+        cpu = unsafe_load(cpup)
+        Or!(cpu, val)
     elseif opcode == 0xf8
         base = cpu.SP
         offset = ccall((:Imm8i, gblib), Int8, (Ptr{Cvoid},), gb.g)
