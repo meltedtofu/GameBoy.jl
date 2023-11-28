@@ -426,22 +426,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
     case 0xCB: {
         cpu_cb_op(gb, cpu);
     } break;
-    case 0x09: { // add $hl, $bc
-        clock_increment(gb);
-        WriteHL(cpu, Add16(cpu, ReadHL(cpu), ReadBC(cpu)));
-    } break;
-    case 0x19: { // add $hl, $de
-        clock_increment(gb);
-        WriteHL(cpu, Add16(cpu, ReadHL(cpu), ReadDE(cpu)));
-    } break;
-    case 0x29: { // add $hl, $hl
-        clock_increment(gb);
-        WriteHL(cpu, Add16(cpu, ReadHL(cpu), ReadHL(cpu)));
-    } break;
-    case 0x39: { // add $hl, $sp
-        clock_increment(gb);
-        WriteHL(cpu, Add16(cpu, ReadHL(cpu), cpu->SP));
-    } break;
     case 0xE8: { // add $sp, imm8i
         uint16_t ea = cpu->SP + Imm8i(gb);
         clock_increment(gb);
@@ -624,33 +608,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
         Ret(gb);
         cpu->InterruptsEnabled = true;
     } break;
-    case 0x00: break; // nop
-    case 0xF3: {
-        cpu->InterruptsEnabled = false;
-        cpu->InterruptEnablePending = false;
-    }
-    break; // di
-    case 0xFB: cpu->InterruptEnablePending = true; break; // ei
-    case 0x76: { // halt
-        cpu->Halted = true;
-        if(cpu->InterruptsEnabled == 0) {
-            cpu->HaltBug = true;
-        }
-    } break;
-    case 0x10: { // stop 0
-        // TODO STOP
-    } break;
-    case 0x37: { // scf
-        UpdateN(cpu, false);
-        UpdateH(cpu, false);
-        UpdateC(cpu, true);
-    } break;
-    case 0x3F: { // ccf
-        UpdateN(cpu, false);
-        UpdateH(cpu, false);
-        UpdateC(cpu, !ReadC(cpu));
-    } break;
-
     }
 }
 uint8_t const BootROM[256] = {
