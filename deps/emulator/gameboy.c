@@ -691,30 +691,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
             cpu->HaltBug = true;
         }
     } break;
-    case 0x27: { // daa
-        uint16_t a = cpu->A;
-        if(ReadN(cpu)) {
-            if(ReadH(cpu)) {
-                a -= 0x06;
-                a &= 0xFF;
-            }
-            if(ReadC(cpu)) {
-                a -= 0x60;
-            }
-        }
-        else {
-            if((a & 0x0F) > 0x09 || ReadH(cpu)) {
-                a += 0x06;
-            }
-            if(a > 0x9F || ReadC(cpu)) {
-                a += 0x60;
-            }
-        }
-        UpdateZ(cpu, (a & 0xFF) == 0);
-        UpdateH(cpu, false);
-        if(a & 0x100) { UpdateC(cpu, true); }
-        cpu->A = a;
-    } break;
     case 0x10: { // stop 0
         // TODO STOP
     } break;

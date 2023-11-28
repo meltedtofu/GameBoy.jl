@@ -340,6 +340,34 @@ function Xor!(cpu::Cpu, v::UInt8)::Nothing
     nothing
 end
 
+function Daa!(cpu::Cpu)::Nothing
+    a = UInt16(cpu.A)
+    if N(cpu)
+        if H(cpu)
+            a -= 0x06
+            a &= 0xff
+        end
+        if C(cpu)
+            a -= 0x60
+        end
+    else
+        if a & 0x0f > 0x09 || H(cpu)
+            a += 0x06
+        end
+        if a > 0x9f || C(cpu)
+            a += 0x60
+        end
+    end
+    Z!(cpu, (a & 0xff) == 0)
+    H!(cpu, false)
+    if a & 0x100 > 0
+        C!(cpu, true)
+        a &= 0xff
+    end
+    cpu.A = a
+    nothing
+end
+
 function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
     # NOTE: the mo for this port is top down. move it over section by section and then ccall the library with the rest of the lines.
 
@@ -453,6 +481,8 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.H = val
+    elseif opcode == 0x27
+        Daa!(cpu)
     elseif opcode == 0x2a
         addr = HL(cpu)
         val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
