@@ -421,22 +421,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
         clock_increment(gb);
         Push16(gb, ReadAF(cpu));
         break;
-    // inc reg8
-    case 0x04: cpu->B = Inc8(cpu, cpu->B); break;
-    case 0x0C: cpu->C = Inc8(cpu, cpu->C); break;
-    case 0x14: cpu->D = Inc8(cpu, cpu->D); break;
-    case 0x1C: cpu->E = Inc8(cpu, cpu->E); break;
-    case 0x24: cpu->H = Inc8(cpu, cpu->H); break;
-    case 0x2C: cpu->L = Inc8(cpu, cpu->L); break;
-    case 0x3C: cpu->A = Inc8(cpu, cpu->A); break;
-    // dec reg8
-    case 0x05: cpu->B = Dec8(cpu, cpu->B); break;
-    case 0x0D: cpu->C = Dec8(cpu, cpu->C); break;
-    case 0x15: cpu->D = Dec8(cpu, cpu->D); break;
-    case 0x1D: cpu->E = Dec8(cpu, cpu->E); break;
-    case 0x25: cpu->H = Dec8(cpu, cpu->H); break;
-    case 0x2D: cpu->L = Dec8(cpu, cpu->L); break;
-    case 0x3D: cpu->A = Dec8(cpu, cpu->A); break;
     // cp $a, reg8
     case 0xB8: Sub8(cpu, cpu->A, cpu->B, false); break;
     case 0xB9: Sub8(cpu, cpu->A, cpu->C, false); break;
