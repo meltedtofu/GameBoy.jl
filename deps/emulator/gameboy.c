@@ -415,34 +415,12 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
 
     switch(opcode) {
       // TODO: Why does this one not work? Probably an issue with flag setting/clearing. Hopefully future math instructions force me to debug this with more direct evidence.
+      // Update. Sub8 also doesn't work. Leaning towards "something about integer overflow/underflow is different" and I have yet to track it down.
+      // Fixed Sub8 by using signed math and manually converting back to unsigned range with `+ 0x100`. I wonder if a similar trick with Push16 will work...
     case 0xF5:
         clock_increment(gb);
         Push16(gb, ReadAF(cpu));
         break;
-    // sub $a, reg8
-    case 0x90: cpu->A = Sub8(cpu, cpu->A, cpu->B, false); break;
-    case 0x91: cpu->A = Sub8(cpu, cpu->A, cpu->C, false); break;
-    case 0x92: cpu->A = Sub8(cpu, cpu->A, cpu->D, false); break;
-    case 0x93: cpu->A = Sub8(cpu, cpu->A, cpu->E, false); break;
-    case 0x94: cpu->A = Sub8(cpu, cpu->A, cpu->H, false); break;
-    case 0x95: cpu->A = Sub8(cpu, cpu->A, cpu->L, false); break;
-    case 0x97: cpu->A = Sub8(cpu, cpu->A, cpu->A, false); break;
-    // sub $a, ($hl)
-    case 0x96: cpu->A = Sub8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), false); break;
-    // sub $a, imm8
-    case 0xD6: cpu->A = Sub8(cpu, cpu->A, Imm8(gb), false); break;
-    // sbc $a, reg8
-    case 0x98: cpu->A = Sub8(cpu, cpu->A, cpu->B, ReadC(cpu)); break;
-    case 0x99: cpu->A = Sub8(cpu, cpu->A, cpu->C, ReadC(cpu)); break;
-    case 0x9A: cpu->A = Sub8(cpu, cpu->A, cpu->D, ReadC(cpu)); break;
-    case 0x9B: cpu->A = Sub8(cpu, cpu->A, cpu->E, ReadC(cpu)); break;
-    case 0x9C: cpu->A = Sub8(cpu, cpu->A, cpu->H, ReadC(cpu)); break;
-    case 0x9D: cpu->A = Sub8(cpu, cpu->A, cpu->L, ReadC(cpu)); break;
-    case 0x9F: cpu->A = Sub8(cpu, cpu->A, cpu->A, ReadC(cpu)); break;
-    // sbc $a, ($hl)
-    case 0x9E: cpu->A = Sub8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), ReadC(cpu)); break;
-    // sbc $a, imm8
-    case 0xDE: cpu->A = Sub8(cpu, cpu->A, Imm8(gb), ReadC(cpu)); break;
     // inc reg8
     case 0x04: cpu->B = Inc8(cpu, cpu->B); break;
     case 0x0C: cpu->C = Inc8(cpu, cpu->C); break;
