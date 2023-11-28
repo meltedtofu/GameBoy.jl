@@ -414,53 +414,11 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
 {
 
     switch(opcode) {
-    // pop $reg16
-    case 0xC1: WriteBC(cpu, Pop16(gb)); break;
-    case 0xD1: WriteDE(cpu, Pop16(gb)); break;
-    case 0xE1: WriteHL(cpu, Pop16(gb)); break;
-    case 0xF1: WriteAF(cpu, Pop16(gb)); break;
-
-    // push $reg16
-    case 0xC5:
-        clock_increment(gb);
-        Push16(gb, ReadBC(cpu));
-        break;
-    case 0xD5:
-        clock_increment(gb);
-        Push16(gb, ReadDE(cpu));
-        break;
-    case 0xE5:
-        clock_increment(gb);
-        Push16(gb, ReadHL(cpu));
-        break;
+      // TODO: Why does this one not work? Probably an issue with flag setting/clearing. Hopefully future math instructions force me to debug this with more direct evidence.
     case 0xF5:
         clock_increment(gb);
         Push16(gb, ReadAF(cpu));
         break;
-    // add $a, reg8
-    case 0x80: cpu->A = Add8(cpu, cpu->A, cpu->B, false); break;
-    case 0x81: cpu->A = Add8(cpu, cpu->A, cpu->C, false); break;
-    case 0x82: cpu->A = Add8(cpu, cpu->A, cpu->D, false); break;
-    case 0x83: cpu->A = Add8(cpu, cpu->A, cpu->E, false); break;
-    case 0x84: cpu->A = Add8(cpu, cpu->A, cpu->H, false); break;
-    case 0x85: cpu->A = Add8(cpu, cpu->A, cpu->L, false); break;
-    case 0x87: cpu->A = Add8(cpu, cpu->A, cpu->A, false); break;
-    // add $a, ($hl)
-    case 0x86: cpu->A = Add8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), false); break;
-    // add $a, imm8
-    case 0xC6: cpu->A = Add8(cpu, cpu->A, Imm8(gb), false); break;
-    // adc $a, reg8
-    case 0x88: cpu->A = Add8(cpu, cpu->A, cpu->B, ReadC(cpu)); break;
-    case 0x89: cpu->A = Add8(cpu, cpu->A, cpu->C, ReadC(cpu)); break;
-    case 0x8A: cpu->A = Add8(cpu, cpu->A, cpu->D, ReadC(cpu)); break;
-    case 0x8B: cpu->A = Add8(cpu, cpu->A, cpu->E, ReadC(cpu)); break;
-    case 0x8C: cpu->A = Add8(cpu, cpu->A, cpu->H, ReadC(cpu)); break;
-    case 0x8D: cpu->A = Add8(cpu, cpu->A, cpu->L, ReadC(cpu)); break;
-    case 0x8F: cpu->A = Add8(cpu, cpu->A, cpu->A, ReadC(cpu)); break;
-    // adc $a, ($hl)
-    case 0x8E: cpu->A = Add8(cpu, cpu->A, mmu_read(gb, ReadHL(cpu)), ReadC(cpu)); break;
-    // adc $a, imm8
-    case 0xCE: cpu->A = Add8(cpu, cpu->A, Imm8(gb), ReadC(cpu)); break;
     // sub $a, reg8
     case 0x90: cpu->A = Sub8(cpu, cpu->A, cpu->B, false); break;
     case 0x91: cpu->A = Sub8(cpu, cpu->A, cpu->C, false); break;
