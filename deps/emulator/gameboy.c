@@ -417,50 +417,14 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
       // TODO: Why does this one not work? Probably an issue with flag setting/clearing. Hopefully future math instructions force me to debug this with more direct evidence.
       // Update. Sub8 also doesn't work. Leaning towards "something about integer overflow/underflow is different" and I have yet to track it down.
       // Fixed Sub8 by using signed math and manually converting back to unsigned range with `+ 0x100`. I wonder if a similar trick with Push16 will work...
-    case 0xF5:
+    case 0xF5: {
         clock_increment(gb);
         Push16(gb, ReadAF(cpu));
-        break;
-
-    case 0x2F: { // cpl
-        UpdateN(cpu, true);
-        UpdateH(cpu, true);
-        cpu->A ^= UINT8_MAX;
     } break;
+
+    // TODO: Deal with this one later.
     case 0xCB: {
         cpu_cb_op(gb, cpu);
-    } break;
-    case 0x03: { // inc $bc
-        clock_increment(gb);
-        WriteBC(cpu, ReadBC(cpu) + 1);
-    } break;
-    case 0x13: { // inc $de
-        clock_increment(gb);
-        WriteDE(cpu, ReadDE(cpu) + 1);
-    } break;
-    case 0x23: { // inc $hl
-        clock_increment(gb);
-        WriteHL(cpu, ReadHL(cpu) + 1);
-    } break;
-    case 0x33: { // inc $sp
-        clock_increment(gb);
-        cpu->SP += 1;
-    } break;
-    case 0x0B: { // dec $bc
-        clock_increment(gb);
-        WriteBC(cpu, ReadBC(cpu) - 1);
-    } break;
-    case 0x1B: { // dec $de
-        clock_increment(gb);
-        WriteDE(cpu, ReadDE(cpu) - 1);
-    } break;
-    case 0x2B: { // dec $hl
-        clock_increment(gb);
-        WriteHL(cpu, ReadHL(cpu) - 1);
-    } break;
-    case 0x3B: { // dec $sp
-        clock_increment(gb);
-        cpu->SP -= 1;
     } break;
     case 0x09: { // add $hl, $bc
         clock_increment(gb);
