@@ -368,6 +368,65 @@ function Daa!(cpu::Cpu)::Nothing
     nothing
 end
 
+macro rlc!(register::String)
+    reg = Symbol(register)
+    return quote
+        function(c::Cpu)
+            top = (c.$reg & 0x80) >> 7
+            c.$reg = (c.$reg << 1) | top
+            ZNHC!(c, c.$reg == 0, false, false, top > 0)
+            nothing
+        end
+    end
+end
+const rlca! = @rlc! "A"
+
+macro rl!(register::String)
+    reg = Symbol(register)
+    return quote
+        function(c::Cpu)
+            bottom = C(c)
+            C!(c, (c.$reg & 0x80 > 0))
+            c.$reg = (c.$reg << 1) | bottom
+            Z!(c, c.$reg == 0)
+            N!(c, false)
+            H!(c, false)
+            nothing
+        end
+    end
+end
+const rla! = @rl! "A"
+
+macro rrc!(register::String)
+    reg = Symbol(register)
+    return quote
+        function(c::Cpu)
+            bottom = c.$reg & 0b1
+            c.$reg = (c.$reg >> 1) | (bottom << 7)
+            ZNHC!(c, c.$reg == 0, false, false, bottom > 0)
+            nothing
+        end
+    end
+end
+const rrca! = @rrc! "A"
+
+macro rr!(register::String)
+    reg = Symbol(register)
+    return quote
+        function(c::Cpu)
+            top = C(c)
+            C!(c, (c.$reg & 0b1 > 0))
+            c.$reg = (top << 7) | (c.$reg >> 1)
+            Z!(c, c.$reg == 0)
+            N!(c, false)
+            H!(c, false)
+            nothing
+        end
+    end
+end
+const rra! = @rr! "A"
+
+
 function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
     # NOTE: the mo for this port is top down. move it over section by section and then ccall the library with the rest of the lines.
 
@@ -411,6 +470,9 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.B = val
+    elseif opcode == 0x07
+        rlca!(cpu)
+        Z!(cpu, false)
     elseif opcode == 0x08
         addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
@@ -433,6 +495,9 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.C = val
+    elseif opcode == 0x0f
+        rrca!(cpu)
+        Z!(cpu, false)
     elseif opcode == 0x11
         val = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
@@ -449,6 +514,9 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.D = val
+    elseif opcode == 0x17
+        rla!(cpu)
+        Z!(cpu, false)
     elseif opcode == 0x1a
         addr = DE(cpu)
         val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
@@ -462,6 +530,9 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.E = val
+    elseif opcode == 0x1f
+        rra!(cpu)
+        Z!(cpu, false)
     elseif opcode == 0x21
         val = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)

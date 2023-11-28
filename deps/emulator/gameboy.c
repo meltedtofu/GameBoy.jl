@@ -422,24 +422,6 @@ void cpu_step(struct Gameboy* gb, struct Cpu* cpu, uint8_t opcode)
         Push16(gb, ReadAF(cpu));
         break;
 
-    case 0x07: { // rlca
-        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x80));
-        cpu->A = (cpu->A << 1u) | (cpu->A >> 7u);
-    } break;
-    case 0x0F: { // rrca
-        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x01));
-        cpu->A = (cpu->A >> 1u) | (cpu->A << 7u);
-    } break;
-    case 0x17: { // rla
-        bool c = ReadC(cpu);
-        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x80));
-        cpu->A = (cpu->A << 1u) | (c? 1 : 0);
-    } break;
-    case 0x1F: { // rra
-        bool c = ReadC(cpu);
-        UpdateZNHC(cpu, false, false, false, (cpu->A & 0x01));
-        cpu->A = (cpu->A >> 1u) | (c? 0x80 : 0x00);
-    } break;
     case 0x2F: { // cpl
         UpdateN(cpu, true);
         UpdateH(cpu, true);
