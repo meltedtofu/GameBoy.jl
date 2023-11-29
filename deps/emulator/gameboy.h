@@ -61,19 +61,6 @@ enum {
     Button_A = 0x01
 };
 
-struct Cpu {
-  uint8_t A, F;
-  uint8_t B, C;
-  uint8_t D, E;
-  uint8_t H, L;
-  uint16_t SP;
-  uint16_t PC;
-  bool InterruptsEnabled;
-  bool InterruptEnablePending;
-  bool Halted;
-  bool HaltBug;
-};
-
 struct Clock {
   uint16_t CycleCount;
   bool TimerOverflow;
@@ -176,7 +163,6 @@ struct Buttons {
 
 struct Gameboy
 {
-    struct Cpu cpu;
     struct Clock clock;
     struct CartInfo info;
     struct Memory mem;

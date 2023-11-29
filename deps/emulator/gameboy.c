@@ -84,7 +84,7 @@ static void clock_countChange(struct Clock* clock, struct Memory* mem, uint16_t 
 uint8_t mmu_read(struct Gameboy*, int);
 void mmu_write(struct Gameboy*, int, uint8_t);
 static void dma_update(struct DMA*, struct Memory*);
-void video_update(struct Gameboy* gb);
+void video_update(struct Gameboy* gb, uint8_t scanline);
 void input_setUp(struct Gameboy*, int button);
 void input_setDown(struct Gameboy*, int button);
 
@@ -107,11 +107,6 @@ void clock_increment(struct Gameboy* gb)
     }
     clock_countChange(clock, mem, clock->CycleCount + 4);
     dma_update(dma, mem);
-    /* Video runs at 1 pixel per clock (4 per machine cycle) */
-    video_update(gb);
-    video_update(gb);
-    video_update(gb);
-    video_update(gb);
 }
 
 static bool clock_getTimerBit(uint8_t control, uint16_t cycles)
@@ -164,24 +159,6 @@ static void clock_countChange(struct Clock *clock, struct Memory *mem, uint16_t 
     clock->CycleCount = new_value;
     mem->IO[IO_Divider] = new_value >> 8u;
 }
-uint8_t Imm8(struct Gameboy* gb)
-{
-    gb->cpu.PC += 1;
-    return mmu_read(gb, gb->cpu.PC - 1);
-}
-
-int8_t Imm8i(struct Gameboy* gb)
-{
-    return (int8_t)Imm8(gb);
-}
-
-uint16_t Imm16(struct Gameboy* gb)
-{
-    uint8_t const lo = Imm8(gb);
-    uint8_t const hi = Imm8(gb);
-    return (hi << 8u) | lo;
-}
-
 
 static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr);
 
@@ -701,9 +678,9 @@ static void video_drawPixel(struct Gameboy* gb, unsigned int scanlineNum, unsign
         gb->lcd.Buffer[x][scanlineNum] = finalColour;
     }
 }
-void video_update(struct Gameboy* gb) {
+void video_update(struct Gameboy* gb, uint8_t scanline) {
     /* Each scanline takes 456 cycles to draw */
-    uint8_t scanline = gb->lcd.FrameProgress / 456;
+    //uint8_t scanline = gb->lcd.FrameProgress / 456;
     assert(scanline <= 154);
 
     bool lcdOn = (gb->mem.IO[IO_LCDControl] & 0x80);
@@ -1015,28 +992,6 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
     gb->clock.TimerOverflow = false;
     gb->clock.TimerLoading = false;
     gb->mem.BootROMEnabled = enableBootROM;
-    /* Either start executing the boot ROM or the Cart code. */
-    if(gb->mem.BootROMEnabled == 1) {
-        gb->cpu.PC = 0;
-    } else {
-        gb->cpu.PC = 0x100;
-    }
-    gb->cpu.SP = 0xFFFE;
-
-    // Taken from The Cycle Accurate GB Doc
-    gb->cpu.A = 0x01;
-    gb->cpu.F = 0xB0;
-    gb->cpu.B = 0x00;
-    gb->cpu.C = 0x13;
-    gb->cpu.D = 0x00;
-    gb->cpu.E = 0xD8;
-    gb->cpu.H = 0x01;
-    gb->cpu.L = 0x4D;
-
-    gb->cpu.InterruptsEnabled = false;
-    gb->cpu.InterruptEnablePending = false;
-    gb->cpu.Halted = false;
-    gb->cpu.HaltBug = false;
     /* Clear all VRAM - the bootrom does this. */
     memset(gb->mem.VideoRAM, 0, sizeof(gb->mem.VideoRAM));
     /* Initialise required IO registers */
@@ -1155,10 +1110,6 @@ void setIF(struct Memory* mem, uint8_t iflag) {
 
 struct Buttons* getButtons(struct Gameboy* gb) {
   return &(gb->buttons);
-}
-
-struct Cpu* getCpu(struct Gameboy* gb) {
-  return &(gb->cpu);
 }
 
 struct LCD* getLCD(struct Gameboy* gb) {
