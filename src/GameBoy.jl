@@ -138,34 +138,6 @@ end
 
 clock_increment(gb::Emulator) = ccall((:clock_increment, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
 
-function handleInterrupts(gb::Emulator, cpup::Ptr{Cpu}, mem::Ptr{Cvoid})
-    iflag = ccall((:getIflag, gblib), UInt8, (Ptr{Cvoid},), mem)
-    ie = ccall((:getInterruptEnable, gblib), UInt8, (Ptr{Cvoid},), mem)
-    mask = 0x1f
-    irqs = ie & iflag & mask
-    if irqs > 0
-        cpu = unsafe_load(cpup)
-        cpu.Halted = false
-        unsafe_store!(cpup, cpu)
-        if cpu.InterruptsEnabled
-            for i ∈ 0:5
-                bit = 0x01 << i
-                if irqs & bit > 0
-                    cpu = unsafe_load(cpup)
-                    cpu.InterruptsEnabled = false
-                    unsafe_store!(cpup, cpu)
-                    clock_increment(gb)
-                    clock_increment(gb)
-                    clock_increment(gb)
-                    ccall((:Call, gblib), Cvoid, (Ptr{Cvoid}, UInt16), gb.g, 0x40 + i*8)
-                    iflag &= ~bit
-                    break
-                end
-            end
-            ccall((:setIF, gblib), Cvoid, (Ptr{Cvoid}, UInt8), mem, iflag)
-        end
-    end
-end
 
 AF(cpu::Cpu)::UInt16 = UInt16(cpu.A) << 8 | UInt16(cpu.F)
 BC(cpu::Cpu)::UInt16 = UInt16(cpu.B) << 8 | UInt16(cpu.C)
@@ -437,6 +409,51 @@ macro rr!(register::String)
 end
 const rra! = @rr! "A"
 
+function rn(gb::Emulator, cpu::Cpu, n::UInt8)::UInt8
+    if n == 0
+        cpu.B
+    elseif n == 1
+        cpu.C
+    elseif n == 2
+        cpu.D
+    elseif n == 3
+        cpu.E
+    elseif n == 4
+        cpu.H
+    elseif n == 5
+        cpu.L
+    elseif n == 6
+        addr = HL(cpu)
+        ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+    elseif n == 7
+        cpu.A
+    else
+        0x00
+    end
+end
+
+function rn!(gb::Emulator, cpu::Cpu, n::UInt8, v::UInt8)::Nothing
+    if n == 0
+        cpu.B = v
+    elseif n == 1
+        cpu.C = v
+    elseif n == 2
+        cpu.D = v
+    elseif n == 3
+        cpu.E = v
+    elseif n == 4
+        cpu.H = v
+    elseif n == 5
+        cpu.L = v
+    elseif n == 6
+        addr = HL(cpu)
+        ccall((:mmu_write, gblib), UInt8, (Ptr{Cvoid}, UInt16, UInt8), gb.g, addr, v)
+    elseif n == 7
+        cpu.A = v
+    end
+    nothing
+end
+
 function jump!(cpu::Cpu, addr::UInt16)::Nothing
     cpu.PC = addr
     nothing
@@ -466,7 +483,105 @@ function ret!(gb::Emulator, cpup::Ptr{Cpu})::Nothing
 end
 
 function cb_step(gb::Emulator, cpup::Ptr{Cpu})::Nothing
-    ccall((:cpu_cb_op, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), gb.g, cpup)
+    opcode = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
+
+    # TODO: Move this to a docstring and better ascii art
+    # XX XXX XXX
+    # ~~ operation
+    #    ~~~ bit index or sub-operation
+    #        ~~~ register
+    op = opcode >> 6
+    bit = (opcode >> 3) & 0x07
+    reg = opcode & 0x07
+
+    if op == 0
+        if bit == 0 # rlc rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            ZNHC!(cpu, val == 0, false, false, (val & 0x80) > 0)
+            unsafe_store!(cpup, cpu)
+            val = (val << 1) | (val >> 7)
+            rn!(gb, cpu, reg, val)
+            unsafe_store!(cpup, cpu)
+        elseif bit == 1 # rrc rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            ZNHC!(cpu, val == 0, false, false, (val & 0x01) > 0)
+            unsafe_store!(cpup, cpu)
+            val = (val >> 1) | (val << 7)
+            rn!(gb, cpu, reg, val)
+            unsafe_store!(cpup, cpu)
+        elseif bit == 2 # rl rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            rotated = (val << 1) | C(cpu)
+            ZNHC!(cpu, rotated == 0, false, false, (val & 0x80) > 0)
+            unsafe_store!(cpup, cpu)
+            rn!(gb, cpu, reg, rotated)
+            unsafe_store!(cpup, cpu)
+        elseif bit == 3 # rr rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            rotated = (val >> 1) | (C(cpu)*0x80)
+            ZNHC!(cpu, rotated == 0, false, false, (val & 0x01) > 0)
+            unsafe_store!(cpup, cpu)
+            rn!(gb, cpu, reg, rotated)
+            unsafe_store!(cpup, cpu)
+        elseif bit == 4 # sla rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            shifted = val << 1
+            ZNHC!(cpu, shifted == 0, false, false, (val & 0x80) > 0)
+            unsafe_store!(cpup, cpu)
+            rn!(gb, cpu, reg, shifted)
+            unsafe_store!(cpup, cpu)
+        elseif bit == 5 # sra rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            shifted = (val >> 1) | (val & 0x80)
+            ZNHC!(cpu, shifted == 0, false, false, (val & 0x01) > 0)
+            unsafe_store!(cpup, cpu)
+            rn!(gb, cpu, reg, shifted)
+            unsafe_store!(cpup, cpu)
+        elseif bit == 6 # swap rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            val = (val >> 4) | (val << 4)
+            ZNHC!(cpu, val == 0, false, false, false)
+            unsafe_store!(cpup, cpu)
+            rn!(gb, cpu, reg, val)
+            unsafe_store!(cpup, cpu)
+        elseif bit == 7 # srl rN
+            cpu = unsafe_load(cpup)
+            val = rn(gb, cpu, reg)
+            shifted = val >> 1
+            ZNHC!(cpu, shifted == 0, false, false, (val & 0x01) > 0)
+            unsafe_store!(cpup, cpu)
+            rn!(gb, cpu, reg, shifted)
+            unsafe_store!(cpup, cpu)
+        end
+    elseif op == 1
+        # bit n, rN
+        cpu = unsafe_load(cpup)
+        val = rn(gb, cpu, reg)
+        Z!(cpu, (val & (0x01 << bit)) == 0)
+        N!(cpu, false)
+        H!(cpu, true)
+        unsafe_store!(cpup, cpu)
+    elseif op == 2
+        # res n, rN
+        cpu = unsafe_load(cpup)
+        val = rn(gb, cpu, reg)
+        rn!(gb, cpu, reg, (val & ~(0x01 << bit)))
+        unsafe_store!(cpup, cpu)
+    elseif op == 3
+        # set n, rN
+        cpu = unsafe_load(cpup)
+        val = rn(gb, cpu, reg)
+        rn!(gb, cpu, reg, (val | (0x01 << bit)))
+        unsafe_store!(cpup, cpu)
+    end
+
     nothing
 end
 
@@ -1371,6 +1486,35 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
     end
 
     unsafe_store!(cpup, cpu)
+end
+
+function handleInterrupts(gb::Emulator, cpup::Ptr{Cpu}, mem::Ptr{Cvoid})
+    iflag = ccall((:getIflag, gblib), UInt8, (Ptr{Cvoid},), mem)
+    ie = ccall((:getInterruptEnable, gblib), UInt8, (Ptr{Cvoid},), mem)
+    mask = 0x1f
+    irqs = ie & iflag & mask
+    if irqs > 0
+        cpu = unsafe_load(cpup)
+        cpu.Halted = false
+        unsafe_store!(cpup, cpu)
+        if cpu.InterruptsEnabled
+            for i ∈ 0:5
+                bit = 0x01 << i
+                if irqs & bit > 0
+                    cpu = unsafe_load(cpup)
+                    cpu.InterruptsEnabled = false
+                    unsafe_store!(cpup, cpu)
+                    clock_increment(gb)
+                    clock_increment(gb)
+                    clock_increment(gb)
+                    call!(gb, cpup, 0x40 + UInt16(i)*0x08)
+                    iflag &= ~bit
+                    break
+                end
+            end
+            ccall((:setIF, gblib), Cvoid, (Ptr{Cvoid}, UInt8), mem, iflag)
+        end
+    end
 end
 
 """
