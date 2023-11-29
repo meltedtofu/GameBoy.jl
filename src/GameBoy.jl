@@ -167,7 +167,7 @@ function handleInterrupts(gb::Emulator, cpup::Ptr{Cpu}, mem::Ptr{Cvoid})
     end
 end
 
-AF(cpu::Cpu)::UInt16 = UInt16(cpu.H) << 8 | UInt16(cpu.F)
+AF(cpu::Cpu)::UInt16 = UInt16(cpu.A) << 8 | UInt16(cpu.F)
 BC(cpu::Cpu)::UInt16 = UInt16(cpu.B) << 8 | UInt16(cpu.C)
 DE(cpu::Cpu)::UInt16 = UInt16(cpu.D) << 8 | UInt16(cpu.E)
 HL(cpu::Cpu)::UInt16 = UInt16(cpu.H) << 8 | UInt16(cpu.L)
@@ -238,21 +238,21 @@ end
 
 function Push16!(gb::Emulator, cpup::Ptr{Cpu}, val::UInt16)::Nothing
     cpu = unsafe_load(cpup)
-    lowbyteaddr = cpu.SP - 2
-    highbyteaddr = cpu.SP - 1
+    lowbyteaddr = cpu.SP - 0x0002
+    highbyteaddr = cpu.SP - 0x0001
     ccall((:mmu_write, gblib), Cvoid, (Ptr{Cvoid}, UInt16, UInt8), gb.g, lowbyteaddr, UInt8(val&0xff))
     ccall((:mmu_write, gblib), Cvoid, (Ptr{Cvoid}, UInt16, UInt8), gb.g, highbyteaddr, UInt8(val >> 8))
     cpu = unsafe_load(cpup)
-    cpu.SP -= 2
+    cpu.SP -= 0x0002
     unsafe_store!(cpup, cpu)
     nothing
 end
 
 function Pop16!(gb::Emulator, cpup::Ptr{Cpu})::UInt16
     cpu = unsafe_load(cpup)
-    cpu.SP += 2
-    lowbyteaddr = cpu.SP - 2
-    highbyteaddr = cpu.SP - 1
+    cpu.SP += 0x0002
+    lowbyteaddr = cpu.SP - 0x0002
+    highbyteaddr = cpu.SP - 0x0001
     unsafe_store!(cpup, cpu)
     val = UInt16(ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, lowbyteaddr))
     val |= UInt16(ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, highbyteaddr)) << 8
@@ -444,6 +444,29 @@ end
 
 function jumprel!(cpu::Cpu, offset::Int8)::Nothing
     cpu.PC += offset
+    nothing
+end
+
+function call!(gb::Emulator, cpup::Ptr{Cpu}, addr::UInt16)::Nothing
+    cpu = unsafe_load(cpup)
+    old = cpu.PC
+    Push16!(gb, cpup, old)
+    cpu = unsafe_load(cpup)
+    cpu.PC = addr
+    unsafe_store!(cpup, cpu)
+    nothing
+end
+
+function ret!(gb::Emulator, cpup::Ptr{Cpu})::Nothing
+    addr = Pop16!(gb, cpup)
+    cpu = unsafe_load(cpup)
+    jump!(cpu, addr)
+    unsafe_store!(cpup, cpu)
+    nothing
+end
+
+function cb_step(gb::Emulator, cpup::Ptr{Cpu})::Nothing
+    ccall((:cpu_cb_op, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), gb.g, cpup)
     nothing
 end
 
@@ -1053,6 +1076,13 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         Cp!(cpu, cpu.A, val)
     elseif opcode == 0xbf
         Cp!(cpu, cpu.A, cpu.A)
+    elseif opcode == 0xc0
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if !Z(cpu)
+            ret!(gb, cpup)
+        end
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xc1
         val = Pop16!(gb, cpup)
         cpu = unsafe_load(cpup)
@@ -1069,6 +1099,14 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         jump!(cpu, addr)
+    elseif opcode == 0xc4
+        addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if !Z(cpu)
+            call!(gb, cpup, addr)
+        end
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xc5
         clock_increment(gb)
         cpu = unsafe_load(cpup)
@@ -1081,6 +1119,21 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.A = Add8!(cpu, cpu.A, val, false)
+    elseif opcode == 0xc7
+        clock_increment(gb)
+        call!(gb, cpup, 0x0000)
+        cpu = unsafe_load(cpup)
+    elseif opcode == 0xc8
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if Z(cpu)
+            ret!(gb, cpup)
+        end
+        cpu = unsafe_load(cpup)
+    elseif opcode == 0xc9
+        clock_increment(gb)
+        ret!(gb, cpup)
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xca
         addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
         clock_increment(gb)
@@ -1088,10 +1141,37 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         if Z(cpu)
             jump!(cpu, addr)
         end
+    elseif opcode == 0xcb
+        cb_step(gb, cpup)
+        cpu = unsafe_load(cpup)
+    elseif opcode == 0xcc
+        addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if Z(cpu)
+            call!(gb, cpup, addr)
+        end
+        cpu = unsafe_load(cpup)
+    elseif opcode == 0xcd
+        addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
+        clock_increment(gb)
+        call!(gb, cpup, addr)
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xce
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.A = Add8!(cpu, cpu.A, val, C(cpu))
+    elseif opcode == 0xcf
+        clock_increment(gb)
+        call!(gb, cpup, 0x0008)
+        cpu = unsafe_load(cpup)
+    elseif opcode == 0xd0
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if !C(cpu)
+            ret!(gb, cpup)
+        end
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xd1
         val = Pop16!(gb, cpup)
         cpu = unsafe_load(cpup)
@@ -1103,6 +1183,14 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         if !C(cpu)
             jump!(cpu, addr)
         end
+    elseif opcode == 0xd4
+        addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if !C(cpu)
+            call!(gb, cpup, addr)
+        end
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xd5
         clock_increment(gb)
         cpu = unsafe_load(cpup)
@@ -1115,6 +1203,22 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.A = Sub8!(cpu, cpu.A, val, false)
+    elseif opcode == 0xd7
+        clock_increment(gb)
+        call!(gb, cpup, 0x0010)
+        cpu = unsafe_load(cpup)
+    elseif opcode == 0xd8
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if C(cpu)
+            ret!(gb, cpup)
+        end
+        cpu = unsafe_load(cpup)
+    elseif opcode == 0xd9
+        clock_increment(gb)
+        ret!(gb, cpup)
+        cpu = unsafe_load(cpup)
+        cpu.InterruptsEnabled = true
     elseif opcode == 0xda
         addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
         clock_increment(gb)
@@ -1122,10 +1226,22 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         if C(cpu)
             jump!(cpu, addr)
         end
+    elseif opcode == 0xdc
+        addr = ccall((:Imm16, gblib), UInt16, (Ptr{Cvoid},), gb.g)
+        clock_increment(gb)
+        cpu = unsafe_load(cpup)
+        if C(cpu)
+            call!(gb, cpup, addr)
+        end
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xde
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         cpu.A = Sub8!(cpu, cpu.A, val, C(cpu))
+    elseif opcode == 0xdf
+        clock_increment(gb)
+        call!(gb, cpup, 0x0018)
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xe0
         offset = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
@@ -1154,6 +1270,10 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         And!(cpu, val)
+    elseif opcode == 0xe7
+        clock_increment(gb)
+        call!(gb, cpup, 0x0020)
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xe8
         base = cpu.SP
         offset = ccall((:Imm8i, gblib), Int8, (Ptr{Cvoid},), gb.g)
@@ -1180,6 +1300,10 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         Xor!(cpu, val)
+    elseif opcode == 0xef
+        clock_increment(gb)
+        call!(gb, cpup, 0x0028)
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xf0
         offset = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         addr = 0xff00 + offset
@@ -1198,18 +1322,21 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
     elseif opcode == 0xf3
         cpu.InterruptsEnabled = false
         cpu.InterruptEnablePending = false
-    #elseif opcode == 0xf5
-    #    ccall((:clock_increment, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
-    #    cpu = unsafe_load(cpup)
-    #    val = AF(cpu)
-    #    unsafe_store!(cpup, cpu)
-    #    Push16!(gb, cpup, val)
-    #    cpu = unsafe_load(cpup)
+    elseif opcode == 0xf5
+        ccall((:clock_increment, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
+        cpu = unsafe_load(cpup)
+        val = AF(cpu)
+        Push16!(gb, cpup, val)
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xf6
         addr = HL(cpu)
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         Or!(cpu, val)
+    elseif opcode == 0xf7
+        clock_increment(gb)
+        call!(gb, cpup, 0x0030)
+        cpu = unsafe_load(cpup)
     elseif opcode == 0xf8
         base = cpu.SP
         offset = ccall((:Imm8i, gblib), Int8, (Ptr{Cvoid},), gb.g)
@@ -1237,12 +1364,13 @@ function cpu_step(gb::Emulator, cpup::Ptr{Cpu})
         val = ccall((:Imm8, gblib), UInt8, (Ptr{Cvoid},), gb.g)
         cpu = unsafe_load(cpup)
         Cp!(cpu, cpu.A, val)
+    elseif opcode == 0xff
+        clock_increment(gb)
+        call!(gb, cpup, 0x0038)
+        cpu = unsafe_load(cpup)
     end
 
     unsafe_store!(cpup, cpu)
-
-    # temporarily ccall the library for the missing functionality while porting is in progress
-    ccall((:cpu_step, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cpu}, UInt8), gb.g, cpup, opcode)
 end
 
 """
