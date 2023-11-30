@@ -34,7 +34,7 @@ readmeifchanged()
 
 makedocs(sitename = "GameBoy.jl",
          format = Documenter.HTML(),
-         modules = [GameBoy],
+         modules = [GameBoy, GameBoy.Processor],
          pages = [
              "Overview" => "index.md",
              "code.md",

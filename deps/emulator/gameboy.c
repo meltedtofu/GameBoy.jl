@@ -82,11 +82,10 @@ static uint8_t const IOUnusedBits[128] = {
 };
 static void clock_countChange(struct Clock* clock, struct Memory* mem, uint16_t new_value);
 uint8_t mmu_read(struct Gameboy*, int);
-void mmu_write(struct Gameboy*, int, uint8_t);
 static void dma_update(struct DMA*, struct Memory*);
 void video_update(struct Gameboy* gb, uint8_t scanline);
-void input_setUp(struct Gameboy*, int button);
-void input_setDown(struct Gameboy*, int button);
+void input_setUp(struct Buttons*, int button);
+void input_setDown(struct Buttons*, struct Memory*, int button);
 
 void clock_increment(struct Gameboy* gb)
 {
@@ -227,11 +226,11 @@ static uint8_t mmu_readRTC(struct RTC* rtc, uint8_t reg)
     //}
 }
 
-static void mmu_writeRTC(struct Gameboy* gb, uint8_t reg, uint8_t val)
+static void mmu_writeRTC(struct Memory* mem, uint8_t reg, uint8_t val)
 {
     if(reg <= 0x0C) {
-        mmu_updateRTC(&(gb->mem.rtc));
-        gb->mem.rtc.BaseReg[reg - 0x08] = val;
+        mmu_updateRTC(&(mem->rtc));
+        mem->rtc.BaseReg[reg - 0x08] = val;
     }
 }
 static uint8_t mmu_readBankedROM(struct Memory* mem, unsigned int relativeAddress)
@@ -292,26 +291,26 @@ static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
     }
 }
 
-static void mmu_writeBankedRAM(struct Gameboy* gb, unsigned int relativeAddress, uint8_t data)
+static void mmu_writeBankedRAM(struct Memory* mem, unsigned int relativeAddress, uint8_t data)
 {
-    if(gb->mem.MBCModel == Cart_MBC3 && gb->mem.MBCRAMBank >= Cart_MBC3_RTCBase) {
-        mmu_writeRTC(gb, gb->mem.MBCRAMBank, data);
+    if(mem->MBCModel == Cart_MBC3 && mem->MBCRAMBank >= Cart_MBC3_RTCBase) {
+        mmu_writeRTC(mem, mem->MBCRAMBank, data);
     }
-    else if(gb->mem.CartRAMBankEnabled) {
-        unsigned int cartAddr = (gb->mem.MBCRAMBank * 8192) + relativeAddress;
-        if(cartAddr < gb->mem.CartRAMSize) {
-            if(gb->mem.MBCModel == Cart_MBC2) {
+    else if(mem->CartRAMBankEnabled) {
+        unsigned int cartAddr = (mem->MBCRAMBank * 8192) + relativeAddress;
+        if(cartAddr < mem->CartRAMSize) {
+            if(mem->MBCModel == Cart_MBC2) {
                 // MBC2 internal RAM is 4bit
                 data &= 0x0F;
             }
-            gb->mem.CartRAM[cartAddr] = data;
+            mem->CartRAM[cartAddr] = data;
         }
     }
 }
 
-static void mmu_setROMBank(struct Gameboy* gb, unsigned int addr, uint8_t data)
+static void mmu_setROMBank(struct Memory* mem, unsigned int addr, uint8_t data)
 {
-    switch(gb->mem.MBCModel) {
+    switch(mem->MBCModel) {
         case Cart_MBC1_16_8:
         case Cart_MBC1_4_32:
             {
@@ -321,27 +320,27 @@ static void mmu_setROMBank(struct Gameboy* gb, unsigned int addr, uint8_t data)
                 if(bankNo == 0) {
                     bankNo = 1;
                 }
-                gb->mem.MBCROMBank = (gb->mem.MBCROMBank & 0xE0) | bankNo;
+                mem->MBCROMBank = (mem->MBCROMBank & 0xE0) | bankNo;
             }
             break;
         case Cart_MBC2:
             {
                 unsigned int bankNo = data & 0x0F;
-                gb->mem.MBCROMBank = bankNo? bankNo : 1;
+                mem->MBCROMBank = bankNo? bankNo : 1;
             }
             break;
         case Cart_MBC3:
             {
                 unsigned int bankNo = data & 0x7F;
-                gb->mem.MBCROMBank = bankNo? bankNo : 1;
+                mem->MBCROMBank = bankNo? bankNo : 1;
             }
             break;
         case Cart_MBC5:
             if(addr < 0x3000) {
-                gb->mem.MBCROMBank = ((gb->mem.MBCROMBank & ~0xFF) | data);
+                mem->MBCROMBank = ((mem->MBCROMBank & ~0xFF) | data);
             }
             else {
-                gb->mem.MBCROMBank = ((gb->mem.MBCROMBank & 0xFF) | ((data & 1u) << 9u));
+                mem->MBCROMBank = ((mem->MBCROMBank & 0xFF) | ((data & 1u) << 9u));
             }
             break;
 
@@ -350,21 +349,21 @@ static void mmu_setROMBank(struct Gameboy* gb, unsigned int addr, uint8_t data)
     }
 }
 
-static void mmu_setRAMBank(struct Gameboy* gb, unsigned int addr, uint8_t data)
+static void mmu_setRAMBank(struct Memory* mem, unsigned int addr, uint8_t data)
 {
-    switch(gb->mem.MBCModel) {
+    switch(mem->MBCModel) {
         case Cart_MBC1_16_8:
-            gb->mem.MBCROMBank = ((gb->mem.MBCROMBank & 0x1F) | ((data & 0x3) << 5u));
+            mem->MBCROMBank = ((mem->MBCROMBank & 0x1F) | ((data & 0x3) << 5u));
             break;
         case Cart_MBC1_4_32:
-            gb->mem.MBCRAMBank = (data & 0x3);
+            mem->MBCRAMBank = (data & 0x3);
             break;
         case Cart_MBC3:
-            gb->mem.MBCRAMBank = data;
+            mem->MBCRAMBank = data;
             break;
         case Cart_MBC5:
             /* TODO Rumble is controlled by bit 4 */
-            gb->mem.MBCRAMBank = (data & 0x0F);
+            mem->MBCRAMBank = (data & 0x0F);
             break;
 
         default:
@@ -385,53 +384,53 @@ uint8_t mmu_read(struct Gameboy* gb, int addr) {
     }
 }
 
-static void mmu_writeDirect(struct Gameboy* gb, uint16_t addr, uint8_t value)
+void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, uint16_t addr, uint8_t value)
 {
     if (addr < 0x2000) {
         /* Cart RAM enable */
-        gb->mem.CartRAMBankEnabled = (value & 0xF) == 0xA;
+        mem->CartRAMBankEnabled = (value & 0xF) == 0xA;
     }
     else if(addr < 0x4000) {
         /* ROM Bank select */
-        mmu_setROMBank(gb, addr, value);
+        mmu_setROMBank(mem, addr, value);
     }
     else if(addr < 0x6000) {
         /* RAM Bank select (or high bits of ROM Bank for MBC1 mode 16/8) */
-        mmu_setRAMBank(gb, addr, value);
+        mmu_setRAMBank(mem, addr, value);
     }
     else if(addr < 0x8000) {
         /* MBC1 Mode selection or MBC3 RTC latching */
-        if(gb->mem.MBCModel == Cart_MBC1_16_8 || gb->mem.MBCModel == Cart_MBC1_4_32) {
+        if(mem->MBCModel == Cart_MBC1_16_8 || mem->MBCModel == Cart_MBC1_4_32) {
             //<< mbc1 model selection >>
         }
-        else if(gb->mem.MBCModel == Cart_MBC3) {
-            if(value == 0x00 && gb->mem.rtc.Latched) {
-                gb->mem.rtc.Latched = false;
+        else if(mem->MBCModel == Cart_MBC3) {
+            if(value == 0x00 && mem->rtc.Latched) {
+                mem->rtc.Latched = false;
             }
-            else if(value == 0x01 && !gb->mem.rtc.Latched) {
-                mmu_updateRTC(&(gb->mem.rtc));
+            else if(value == 0x01 && !mem->rtc.Latched) {
+                mmu_updateRTC(&(mem->rtc));
                 for(unsigned i = 0; i < 5; i += 1) {
-                    gb->mem.rtc.LatchedReg[i] = gb->mem.rtc.BaseReg[i];
+                    mem->rtc.LatchedReg[i] = mem->rtc.BaseReg[i];
                 }
-                gb->mem.rtc.Latched = true;
+                mem->rtc.Latched = true;
             }
         }
     } else if (addr < 0xA000) {
         /* Video RAM */
         // TODO: Writes to VRAM should be ignored when the LCD is being redrawn
-        gb->mem.VideoRAM[addr - 0x8000] = value;
+        mem->VideoRAM[addr - 0x8000] = value;
     } else if (addr < 0xC000) {
         /* Banked RAM Area */
-        mmu_writeBankedRAM(gb, addr - 0xA000, value);
+        mmu_writeBankedRAM(mem, addr - 0xA000, value);
     } else if (addr < 0xE000) {
         /* Internal RAM */
-        gb->mem.WorkRAM[addr - 0xC000] = value;
+        mem->WorkRAM[addr - 0xC000] = value;
     } else if (addr < 0xFE00) {
         /* Mirror of internal RAM */
-        gb->mem.WorkRAM[addr - 0xE000] = value;
+        mem->WorkRAM[addr - 0xE000] = value;
     } else if (addr < 0xFE9F) {
         /* OAM */
-        gb->mem.OAM[addr - 0xFE00] = value;
+        mem->OAM[addr - 0xFE00] = value;
     } else if (addr < 0xFF00) {
         /* Empty */
     } else if (addr < 0xFF80) {
@@ -439,38 +438,38 @@ static void mmu_writeDirect(struct Gameboy* gb, uint16_t addr, uint8_t value)
         switch(addr - 0xFF00) {
             case IO_TimerCounter:
                 /* Writes to the timer counter whilst it is loading are ignored */
-                if(!gb->clock.TimerLoading) {
-                    gb->mem.IO[IO_TimerCounter] = value;
+                if(clock->TimerLoading) {
+                    mem->IO[IO_TimerCounter] = value;
                     /* Writing to timer counter suppresses any pending overflow effects */
-                    gb->clock.TimerOverflow = false;
+                    clock->TimerOverflow = false;
                 }
                 break;
             case IO_TimerModulo:
-                gb->mem.IO[IO_TimerModulo] = value;
+                mem->IO[IO_TimerModulo] = value;
                 /* Whilst the modulo is being loaded any writes are effective immediately */
-                if(gb->clock.TimerLoading) {
-                    gb->mem.IO[IO_TimerCounter] = value;
+                if(clock->TimerLoading) {
+                    mem->IO[IO_TimerCounter] = value;
                 }
             case IO_TimerControl:
-                clock_updateTimerControl(&(gb->clock), &(gb->mem), value);
+                clock_updateTimerControl(clock, mem, value);
                 break;
             case IO_Divider:
-                clock_countChange(&(gb->clock), &(gb->mem), 0);
+                clock_countChange(clock, mem, 0);
                 break;
             case IO_InterruptFlag:
                 /* Top 5 bits of IF always read 1s */
-                gb->mem.IO[IO_InterruptFlag] = value | 0xE0;
+                mem->IO[IO_InterruptFlag] = value | 0xE0;
                 break;
             case IO_BootROMDisable: /* Writing to this address disables the boot ROM */
                 {
-                    gb->mem.BootROMEnabled = false;
+                    mem->BootROMEnabled = false;
                 }
                 break;
             case IO_OAMDMA: /* LCD OAM DMA transfer */
                 {
                     if(value <= 0xF1) {
-                        gb->dma.PendingSource = value;
-                        gb->dma.DelayStart = true;
+                        dma->PendingSource = value;
+                        dma->DelayStart = true;
                     } else {
                         assert(false && "Invalid LCD OAM transfer range");
                     }
@@ -478,47 +477,30 @@ static void mmu_writeDirect(struct Gameboy* gb, uint16_t addr, uint8_t value)
                 break;
             case IO_LCDStat:
                 {
-                    uint8_t cur = gb->mem.IO[IO_LCDStat];
-                    gb->mem.IO[IO_LCDStat] = (cur & 0x3) | (value & ~0x3);
+                    uint8_t cur = mem->IO[IO_LCDStat];
+                    mem->IO[IO_LCDStat] = (cur & 0x3) | (value & ~0x3);
                 }
                 break;
 
             case IO_LCDY: /* Current scanline -> writing resets it to zero */
                 {
-                    gb->mem.IO[IO_LCDY] = 0;
+                    mem->IO[IO_LCDY] = 0;
                 }
                 break;
 
-            default: gb->mem.IO[addr - 0xFF00] = value; break;
+            default: mem->IO[addr - 0xFF00] = value; break;
         }
     } else if (addr < 0xFFFF) {
-        gb->mem.HighRAM[addr - 0xFF80] = value;
+        mem->HighRAM[addr - 0xFF80] = value;
     } else {
-        gb->mem.InterruptEnable = value;
+        mem->InterruptEnable = value;
     }
 }
 
-void mmu_write(struct Gameboy* gb, int addr, uint8_t value) {
-    clock_increment(gb);
-
-    /* TODO is access to IO space (0xFF00 - 0xFF7F) OK? */
-    if(gb->dma.Active && addr < 0xFF00) {
-        /* When OAM DMA is in progress any memory writes outside of
-         * high RAM (0xFF80 - 0xFFFE) will be ignored */
-    }
-    else {
-        mmu_writeDirect(gb, addr, value);
-    }
-}
-
+//TODO: Remove. this is only a shim for julia to read an arbitrary memory address
 uint8_t gameboy_read(struct Gameboy* gb, uint16_t addr)
 {
     return mmu_readDirect(&(gb->mem), addr);
-}
-
-void gameboy_write(struct Gameboy* gb, uint16_t addr, uint8_t value)
-{
-    mmu_writeDirect(gb, addr, value);
 }
 
 static void dma_update(struct DMA* dma, struct Memory* mem)
@@ -765,15 +747,15 @@ void video_update(struct Gameboy* gb, uint8_t scanline) {
 
     gb->lcd.FrameProgress = (gb->lcd.FrameProgress + 1) % 70224;
 }
-void input_setUp(struct Gameboy* gb, int button)
+void input_setUp(struct Buttons* buttons, int button)
 {
-    gb->buttons.Pressed &= ~button;
+    buttons->Pressed &= ~button;
 }
-void input_setDown(struct Gameboy* gb, int button)
+void input_setDown(struct Buttons* buttons, struct Memory* mem, int button)
 {
-    if((gb->buttons.Pressed & button) == 0) {
-        gb->buttons.Pressed |= button;
-        gb->mem.IO[IO_InterruptFlag] |= Interrupt_Joypad;
+    if((buttons->Pressed & button) == 0) {
+        buttons->Pressed |= button;
+        mem->IO[IO_InterruptFlag] |= Interrupt_Joypad;
     }
 }
 void input_update(struct Memory* mem, struct Buttons* buttons)
@@ -793,10 +775,10 @@ void input_update(struct Memory* mem, struct Buttons* buttons)
 void gameboy_setButtonState(struct Gameboy* gb, int button, bool down)
 {
     if(down) {
-        input_setDown(gb, button);
+        input_setDown(&(gb->buttons), &(gb->mem), button);
     }
     else {
-        input_setUp(gb, button);
+        input_setUp(&(gb->buttons), button);
     }
 }
 char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
@@ -1094,6 +1076,14 @@ void* updateFrameBuffer(struct LCD* lcd) {
 
 struct Memory* getMemory(struct Gameboy* gb) {
   return &(gb->mem);
+}
+
+struct DMA* getDma(struct Gameboy* gb) {
+  return &(gb->dma);
+}
+
+struct Clock* getClock(struct Gameboy* gb) {
+  return &(gb->clock);
 }
 
 uint8_t getIflag(struct Memory* mem) {
