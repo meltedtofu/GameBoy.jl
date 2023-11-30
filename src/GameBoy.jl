@@ -174,6 +174,25 @@ function clock_increment(gb::Emulator)::Nothing
     end
 end
 
+function mmu_readDirect(gb::Emulator, addr::UInt16)::UInt8
+    ccall((:mmu_readDirect, gblib),
+          UInt8,
+          (Ptr{Cvoid}, UInt16),
+          ccall((:getMemory, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g),
+          addr)
+end
+
+function mmu_read!(gb::Emulator, addr::UInt16)::UInt8
+    clock_increment(gb)
+    dmap = ccall((:getDma, gblib), Ptr{DMA}, (Ptr{Cvoid},), gb.g)
+    dma = unsafe_load(dmap)
+    if dma.active && addr < 0xff00
+        0xff
+    else
+        mmu_readDirect(gb, addr)
+    end
+end
+
 function mmu_write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
     clock_increment(gb)
 
@@ -280,8 +299,8 @@ function Pop16!(gb::Emulator, cpu::Cpu)::UInt16
     lowbyteaddr = cpu.SP - 0x0002
     highbyteaddr = cpu.SP - 0x0001
 
-    val = UInt16(ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, lowbyteaddr))
-    val |= UInt16(ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, highbyteaddr)) << 8
+    val = UInt16(mmu_read!(gb, lowbyteaddr))
+    val |= UInt16(mmu_read!(gb, highbyteaddr)) << 8
     val
 end
 
@@ -478,7 +497,7 @@ function rn(gb::Emulator, cpu::Cpu, n::UInt8)::UInt8
         cpu.L
     elseif n == 6
         addr = HL(cpu)
-        ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        mmu_read!(gb, addr)
     elseif n == 7
         cpu.A
     else
@@ -538,7 +557,7 @@ end
 
 function imm8(gb::Emulator, cpu::Cpu)::UInt8
     cpu.PC += 0x0001
-    ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, cpu.PC - 0x0001)
+    mmu_read!(gb, cpu.PC - 0x0001)
 end
 
 function imm8i(gb::Emulator, cpu::Cpu)::Int8
@@ -711,7 +730,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), BC(cpu)))
     elseif opcode == 0x0a
         addr = BC(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
     elseif opcode == 0x0b
@@ -761,7 +780,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), DE(cpu)))
     elseif opcode == 0x1a
         addr = DE(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
     elseif opcode == 0x1b
@@ -819,7 +838,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), HL(cpu)))
     elseif opcode == 0x2a
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
         HL!(cpu, HL(cpu)+0x01)
@@ -859,7 +878,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.SP += 0x01
     elseif opcode == 0x34
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         res = Inc8!(cpu, val)
 
@@ -867,7 +886,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
 
     elseif opcode == 0x35
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         res = Dec8!(cpu, val)
 
@@ -895,7 +914,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), cpu.SP))
     elseif opcode == 0x3a
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
         HL!(cpu, HL(cpu) - 0x01)
@@ -928,7 +947,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.B = cpu.L
     elseif opcode == 0x46
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.B = val
     elseif opcode == 0x47
@@ -947,7 +966,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.C = cpu.L
     elseif opcode == 0x4e
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.C = val
     elseif opcode == 0x4f
@@ -966,7 +985,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.D = cpu.L
     elseif opcode == 0x56
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.D = val
     elseif opcode == 0x57
@@ -985,7 +1004,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.E = cpu.L
     elseif opcode == 0x5e
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.E = val
     elseif opcode == 0x5f
@@ -1004,7 +1023,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.H = cpu.L
     elseif opcode == 0x66
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.H = val
     elseif opcode == 0x67
@@ -1023,7 +1042,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.L = cpu.L
     elseif opcode == 0x6e
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.L = val
     elseif opcode == 0x6f
@@ -1082,7 +1101,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = cpu.L
     elseif opcode == 0x7e
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
     elseif opcode == 0x7f
@@ -1101,7 +1120,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Add8!(cpu, cpu.A, cpu.L, false)
     elseif opcode == 0x86
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = Add8!(cpu, cpu.A, val, false)
     elseif opcode == 0x87
@@ -1120,7 +1139,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Add8!(cpu, cpu.A, cpu.L, C(cpu))
     elseif opcode == 0x8e
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = Add8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0x8f
@@ -1139,7 +1158,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Sub8!(cpu, cpu.A, cpu.L, false)
     elseif opcode == 0x96
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = Sub8!(cpu, cpu.A, val, false)
     elseif opcode == 0x97
@@ -1158,7 +1177,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Sub8!(cpu, cpu.A, cpu.L, C(cpu))
     elseif opcode == 0x9e
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = Sub8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0x9f
@@ -1177,7 +1196,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         And!(cpu, cpu.L)
     elseif opcode == 0xa6
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         And!(cpu, val)
     elseif opcode == 0xa7
@@ -1196,7 +1215,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         Xor!(cpu, cpu.L)
     elseif opcode == 0xae
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         Xor!(cpu, val)
     elseif opcode == 0xaf
@@ -1215,7 +1234,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         Or!(cpu, cpu.L)
     elseif opcode == 0xb6
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         Or!(cpu, val)
     elseif opcode == 0xb7
@@ -1234,7 +1253,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         Cp!(cpu, cpu.A, cpu.L)
     elseif opcode == 0xbe
         addr = HL(cpu)
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         Cp!(cpu, cpu.A, val)
     elseif opcode == 0xbf
@@ -1473,7 +1492,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         offset = imm8(gb, cpu)
         addr = 0xff00 + offset
 
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
     elseif opcode == 0xf1
@@ -1482,7 +1501,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         AF!(cpu, val)
     elseif opcode == 0xf2
         addr = 0xff00 + cpu.C
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
     elseif opcode == 0xf3
@@ -1522,7 +1541,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xfa
         addr = imm16(gb, cpu)
 
-        val = ccall((:mmu_read, gblib), UInt8, (Ptr{Cvoid}, UInt16), gb.g, addr)
+        val = mmu_read!(gb, addr)
 
         cpu.A = val
     elseif opcode == 0xfb

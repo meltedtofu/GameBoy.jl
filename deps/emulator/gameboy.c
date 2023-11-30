@@ -81,7 +81,6 @@ static uint8_t const IOUnusedBits[128] = {
     // ...
 };
 static void clock_countChange(struct Clock* clock, struct Memory* mem, uint16_t new_value);
-uint8_t mmu_read(struct Gameboy*, int);
 static void dma_update(struct DMA*, struct Memory*);
 void video_update(struct Gameboy* gb, uint8_t scanline);
 void input_setUp(struct Buttons*, int button);
@@ -159,7 +158,7 @@ static void clock_countChange(struct Clock *clock, struct Memory *mem, uint16_t 
     mem->IO[IO_Divider] = new_value >> 8u;
 }
 
-static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr);
+uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr);
 
 uint8_t const BootROM[256] = {
     0x31,0xFE,0xFF,0xAF,0x21,0xFF,0x9F,0x32,0xCB,0x7C,0x20,0xFB,0x21,0x26,0xFF,0x0E,
@@ -254,7 +253,7 @@ static uint8_t mmu_readBankedRAM(struct Memory* mem, unsigned int relativeAddres
         }
     }
 }
-static uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
+uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
     if ((addr <= 0x00FF) && mem->BootROMEnabled) {
         return BootROM[addr];
     } else if (addr < 0x4000) {
@@ -368,19 +367,6 @@ static void mmu_setRAMBank(struct Memory* mem, unsigned int addr, uint8_t data)
 
         default:
             break;
-    }
-}
-
-uint8_t mmu_read(struct Gameboy* gb, int addr) {
-    clock_increment(gb);
-
-    if(gb->dma.Active && addr < 0xFF80) {
-        /* When OAM DMA is in progress any memory accesses outside of
-         * high RAM (0xFF80 - 0xFFFE) will return 0xFF */
-        return 0xFF;
-    }
-    else {
-        return mmu_readDirect(&(gb->mem), addr);
     }
 }
 
