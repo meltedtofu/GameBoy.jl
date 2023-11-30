@@ -61,9 +61,11 @@ Read and write bytes to the correct subsystem based on address.
 mutable struct Mmu
     workram::OffsetVector{UInt8, Vector{UInt8}}
     highram::OffsetVector{UInt8, Vector{UInt8}}
+    interrupt_enable::UInt8
 
     Mmu() = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
                 OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
+                0x00,
                )
 end
 
@@ -174,6 +176,7 @@ function reset!(gb::Emulator)
     enableBootRom = true
     ccall((:gameboy_reset, gblib), Cvoid, (Ptr{Cvoid}, Bool), gb.g, enableBootRom)
     gb.cpu = Cpu(enableBootRom)
+    gb.mmu.interrupt_enable = 0x00
     nothing
 end
 
@@ -223,6 +226,8 @@ function mmu_readDirect(gb::Emulator, addr::UInt16)::UInt8
         0x00
     elseif 0xff80 <= addr < 0xffff
         gb.mmu.highram[addr - 0xff80]
+    elseif 0xffff == addr
+        gb.mmu.interrupt_enable
     else
         ccall((:mmu_readDirect, gblib),
               UInt8,
@@ -254,6 +259,8 @@ function mmu_writeDirect!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
     elseif 0xfe9f <= addr < 0xff00
     elseif 0xff80 <= addr < 0xffff
         gb.mmu.highram[addr - 0xff80] = val
+    elseif 0xffff == addr
+        gb.mmu.interrupt_enable = val
     else
         ccall((:mmu_writeDirect, gblib),
               Cvoid,
@@ -1621,15 +1628,12 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         call!(gb, cpu, 0x0038)
 
     end
-
-
 end
 
 function handleInterrupts(gb::Emulator, cpu::Cpu, mem::Ptr{Cvoid})
     iflag = ccall((:getIflag, gblib), UInt8, (Ptr{Cvoid},), mem)
-    ie = ccall((:getInterruptEnable, gblib), UInt8, (Ptr{Cvoid},), mem)
     mask = 0x1f
-    irqs = ie & iflag & mask
+    irqs = gb.mmu.interrupt_enable & iflag & mask
     if irqs > 0
         cpu.Halted = false
         if cpu.InterruptsEnabled

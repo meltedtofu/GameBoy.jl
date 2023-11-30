@@ -264,7 +264,7 @@ uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
     } else if(addr < 0xFFFF) {
         assert(false);
     } else {
-        return mem->InterruptEnable;
+        assert(false);
     }
 }
 
@@ -458,7 +458,7 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
     } else if (addr < 0xFFFF) {
         assert(false);
     } else {
-        mem->InterruptEnable = value;
+        assert(false);
     }
 }
 
@@ -956,7 +956,6 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
     gb->mem.IO[IO_ObjectPalette1] = 0xFF;
     gb->mem.IO[IO_WindowX] = 0x00;
     gb->mem.IO[IO_WindowY] = 0x00;
-    gb->mem.InterruptEnable = 0x00;
 
     /* Initialise sound IO registers */
     //gb->mem.IO[0xFF10] = 0x80;
@@ -1053,10 +1052,6 @@ struct Clock* getClock(struct Gameboy* gb) {
 
 uint8_t getIflag(struct Memory* mem) {
   return mem->IO[IO_InterruptFlag];
-}
-
-uint8_t getInterruptEnable(struct Memory* mem) {
-  return mem->InterruptEnable;
 }
 
 void setIF(struct Memory* mem, uint8_t iflag) {

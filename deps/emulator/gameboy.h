@@ -94,8 +94,6 @@ struct Memory {
   uint8_t IO[128];
   /* 0xFF80 - 0xFFFE */
   //uint8_t HighRAM[127];
-  /* 0xFFFF */
-  uint8_t InterruptEnable;
 
   /* The cartridge ROM & RAM is typically banked into the main address
    * space using a MBC chip */
