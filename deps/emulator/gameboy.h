@@ -87,13 +87,13 @@ struct Memory {
   /* 0x8000 - 0x9FFF */
   uint8_t VideoRAM[8192];
   /* 0xC000 - 0xDFFF */
-  uint8_t WorkRAM[8192];
+  //uint8_t WorkRAM[8192];
   /* 0xFE00 - 0xFE9F */
   uint8_t OAM[160];
   /* 0xFF00 - 0xFF7F */
   uint8_t IO[128];
   /* 0xFF80 - 0xFFFE */
-  uint8_t HighRAM[127];
+  //uint8_t HighRAM[127];
   /* 0xFFFF */
   uint8_t InterruptEnable;
 

@@ -59,9 +59,11 @@ Memory Mapping Unit
 Read and write bytes to the correct subsystem based on address.
 """
 mutable struct Mmu
-    workram
+    workram::OffsetVector{UInt8, Vector{UInt8}}
+    highram::OffsetVector{UInt8, Vector{UInt8}}
 
     Mmu() = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
+                OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
                )
 end
 
@@ -217,6 +219,10 @@ function mmu_readDirect(gb::Emulator, addr::UInt16)::UInt8
         gb.mmu.workram[addr - 0xc000]
     elseif 0xe000 <= addr < 0xfe00
         gb.mmu.workram[addr - 0xe000]
+    elseif 0xfe9f <= addr < 0xff00
+        0x00
+    elseif 0xff80 <= addr < 0xffff
+        gb.mmu.highram[addr - 0xff80]
     else
         ccall((:mmu_readDirect, gblib),
               UInt8,
@@ -245,6 +251,9 @@ function mmu_writeDirect!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
         gb.mmu.workram[addr - 0xc000] = val
     elseif 0xe000 <= addr < 0xfe00
         gb.mmu.workram[addr - 0xe000] = val
+    elseif 0xfe9f <= addr < 0xff00
+    elseif 0xff80 <= addr < 0xffff
+        gb.mmu.highram[addr - 0xff80] = val
     else
         ccall((:mmu_writeDirect, gblib),
               Cvoid,

@@ -257,12 +257,12 @@ uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
         return mem->OAM[addr - 0xFE00];
     } else if (addr < 0xFF00) {
         /* Empty */
-        return 0x00;
+        assert(false);
     } else if (addr < 0xFF80) {
         /* IO registers */
         return mem->IO[addr - 0xFF00];// | IOUnusedBits[addr - 0xFF00];
     } else if(addr < 0xFFFF) {
-        return mem->HighRAM[addr - 0xFF80];
+        assert(false);
     } else {
         return mem->InterruptEnable;
     }
@@ -391,11 +391,12 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
         /* Internal RAM */
     } else if (addr < 0xFE00) {
         /* Mirror of internal RAM */
-        mem->WorkRAM[addr - 0xE000] = value;
+        assert(false);
     } else if (addr < 0xFE9F) {
         /* OAM */
         mem->OAM[addr - 0xFE00] = value;
     } else if (addr < 0xFF00) {
+        assert(false);
         /* Empty */
     } else if (addr < 0xFF80) {
         /* IO registers */
@@ -455,7 +456,7 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
             default: mem->IO[addr - 0xFF00] = value; break;
         }
     } else if (addr < 0xFFFF) {
-        mem->HighRAM[addr - 0xFF80] = value;
+        assert(false);
     } else {
         mem->InterruptEnable = value;
     }
