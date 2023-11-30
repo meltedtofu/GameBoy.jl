@@ -214,40 +214,16 @@ static void mmu_writeRTC(struct Memory* mem, uint8_t reg, uint8_t val)
         mem->rtc.BaseReg[reg - 0x08] = val;
     }
 }
-static uint8_t mmu_readBankedROM(struct Memory* mem, unsigned int relativeAddress)
-{
-    unsigned int cartAddr = (mem->MBCROMBank * 16384) + relativeAddress;
-    return mem->CartROM[cartAddr % mem->CartROMSize];
-}
 
-static uint8_t mmu_readBankedRAM(struct Memory* mem, unsigned int relativeAddress)
-{
-    if(mem->MBCModel == Cart_MBC3 && mem->MBCRAMBank >= Cart_MBC3_RTCBase) {
-        return mmu_readRTC(&(mem->rtc), mem->MBCRAMBank);
-    }
-    else {
-        unsigned int cartAddr = (mem->MBCRAMBank * 8192) + relativeAddress;
-        if(mem->CartRAMSize && mem->CartRAMBankEnabled) {
-            return mem->CartRAM[cartAddr % mem->CartRAMSize];
-        }
-        else {
-            return 0xFF;
-        }
-    }
-}
 uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
     if (addr < 0x4000) {
-        /* 16K - ROM Bank #0 (fixed) */
-        return mem->CartROM[addr];
-    } else if (addr < 0x8000) {
-        /* 16K - Banked ROM area */
-        return mmu_readBankedROM(mem, addr - 0x4000);
+      assert(false);
     } else if (addr < 0xA000) {
         /* Video RAM */
         return mem->VideoRAM[addr - 0x8000];
     } else if (addr < 0xC000) {
         /* 8K - Banked RAM Area */
-        return mmu_readBankedRAM(mem, addr - 0xA000);
+        assert(false);
     } else if (addr < 0xE000) {
         assert(false);
     } else if (addr < 0xFE00) {
@@ -268,99 +244,18 @@ uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
     }
 }
 
-static void mmu_writeBankedRAM(struct Memory* mem, unsigned int relativeAddress, uint8_t data)
-{
-    if(mem->MBCModel == Cart_MBC3 && mem->MBCRAMBank >= Cart_MBC3_RTCBase) {
-        mmu_writeRTC(mem, mem->MBCRAMBank, data);
-    }
-    else if(mem->CartRAMBankEnabled) {
-        unsigned int cartAddr = (mem->MBCRAMBank * 8192) + relativeAddress;
-        if(cartAddr < mem->CartRAMSize) {
-            if(mem->MBCModel == Cart_MBC2) {
-                // MBC2 internal RAM is 4bit
-                data &= 0x0F;
-            }
-            mem->CartRAM[cartAddr] = data;
-        }
-    }
-}
-
-static void mmu_setROMBank(struct Memory* mem, unsigned int addr, uint8_t data)
-{
-    switch(mem->MBCModel) {
-        case Cart_MBC1_16_8:
-        case Cart_MBC1_4_32:
-            {
-                /* Bottom 5 bits of ROM Bank number */
-                unsigned int bankNo = data & 0x1F;
-                /* Zero in this register always maps to 1 */
-                if(bankNo == 0) {
-                    bankNo = 1;
-                }
-                mem->MBCROMBank = (mem->MBCROMBank & 0xE0) | bankNo;
-            }
-            break;
-        case Cart_MBC2:
-            {
-                unsigned int bankNo = data & 0x0F;
-                mem->MBCROMBank = bankNo? bankNo : 1;
-            }
-            break;
-        case Cart_MBC3:
-            {
-                unsigned int bankNo = data & 0x7F;
-                mem->MBCROMBank = bankNo? bankNo : 1;
-            }
-            break;
-        case Cart_MBC5:
-            if(addr < 0x3000) {
-                mem->MBCROMBank = ((mem->MBCROMBank & ~0xFF) | data);
-            }
-            else {
-                mem->MBCROMBank = ((mem->MBCROMBank & 0xFF) | ((data & 1u) << 9u));
-            }
-            break;
-
-        default:
-            break;
-    }
-}
-
-static void mmu_setRAMBank(struct Memory* mem, unsigned int addr, uint8_t data)
-{
-    switch(mem->MBCModel) {
-        case Cart_MBC1_16_8:
-            mem->MBCROMBank = ((mem->MBCROMBank & 0x1F) | ((data & 0x3) << 5u));
-            break;
-        case Cart_MBC1_4_32:
-            mem->MBCRAMBank = (data & 0x3);
-            break;
-        case Cart_MBC3:
-            mem->MBCRAMBank = data;
-            break;
-        case Cart_MBC5:
-            /* TODO Rumble is controlled by bit 4 */
-            mem->MBCRAMBank = (data & 0x0F);
-            break;
-
-        default:
-            break;
-    }
-}
 
 void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, uint16_t addr, uint8_t value)
 {
     if (addr < 0x2000) {
         /* Cart RAM enable */
-        mem->CartRAMBankEnabled = (value & 0xF) == 0xA;
+        //mem->CartRAMBankEnabled = (value & 0xF) == 0xA;
     }
     else if(addr < 0x4000) {
-        /* ROM Bank select */
-        mmu_setROMBank(mem, addr, value);
+      assert(false);
     }
     else if(addr < 0x6000) {
-        /* RAM Bank select (or high bits of ROM Bank for MBC1 mode 16/8) */
-        mmu_setRAMBank(mem, addr, value);
+      assert(false);
     }
     else if(addr < 0x8000) {
         /* MBC1 Mode selection or MBC3 RTC latching */
@@ -384,8 +279,8 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
         // TODO: Writes to VRAM should be ignored when the LCD is being redrawn
         mem->VideoRAM[addr - 0x8000] = value;
     } else if (addr < 0xC000) {
-        assert(false);
         /* Banked RAM Area */
+        assert(false);
     } else if (addr < 0xE000) {
         assert(false);
         /* Internal RAM */
@@ -749,187 +644,13 @@ void gameboy_setButtonState(struct Gameboy* gb, int button, bool down)
 char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
 {
     /* Reset state */
-    memset(&gb->info.Title[0], 0, sizeof(gb->info.Title));
-    gb->info.HasRTC = false;
-    gb->info.HasBattery = false;
-    gb->info.HasRumble = false;
-    gb->mem.CartRAMSize = 0;
-    gb->mem.CartROMSize = 0;
     gb->mem.rtc.BaseTime = time(NULL);
     for(unsigned i = 0; i < 5; i += 1) {
         gb->mem.rtc.BaseReg[i] = 0x00;
     }
-    {
-        uint8_t headerChecksum = 0;
-        for(unsigned int i = 0x134; i < 0x14D; i += 1) {
-            headerChecksum = headerChecksum - gb->mem.CartROM[i] - 1;
-        }
-        if(headerChecksum != gb->mem.CartROM[0x14D] && !skipChecksum) {
-            return "Header checksum incorrect";
-        }
-    }
-    /* Copy ROM title */
-    for(unsigned int i = 0; i < 16; i += 1) {
-        uint8_t x = gb->mem.CartROM[0x134 + i];
-        /* High bytes are part of new-style licences */
-        if(x <= 127) {
-            gb->info.Title[i] = x;
-        }
-    }
-    switch (gb->mem.CartROM[0x147]) {
-        case 0x00:
-            gb->mem.MBCModel = Cart_MBC_None;
-            break;
-        case 0x01:
-            gb->mem.MBCModel = Cart_MBC1_16_8;
-            break;
-        case 0x02:
-            gb->mem.MBCModel = Cart_MBC1_16_8;
-            break;
-        case 0x03:
-            gb->mem.MBCModel = Cart_MBC1_16_8;
-            gb->info.HasBattery = true;
-            break;
-        case 0x05:
-            gb->mem.MBCModel = Cart_MBC2;
-            break;
-        case 0x06:
-            gb->mem.MBCModel = Cart_MBC2;
-            gb->info.HasBattery = true;
-            break;
-        case 0x08:
-            gb->mem.MBCModel = Cart_MBC_None;
-            break;
-        case 0x09:
-            gb->mem.MBCModel = Cart_MBC_None;
-            gb->info.HasBattery = true;
-            break;
-        case 0x0F:
-            gb->mem.MBCModel = Cart_MBC3;
-            gb->info.HasBattery = true;
-            gb->info.HasRTC = true;
-            break;
-        case 0x10:
-            gb->mem.MBCModel = Cart_MBC3;
-            gb->info.HasBattery = true;
-            gb->info.HasRTC = true;
-            break;
-        case 0x11:
-            gb->mem.MBCModel = Cart_MBC3;
-            break;
-        case 0x12:
-            gb->mem.MBCModel = Cart_MBC3;
-            break;
-        case 0x13:
-            gb->mem.MBCModel = Cart_MBC3;
-            gb->info.HasBattery = true;
-            break;
-        case 0x19:
-            gb->mem.MBCModel = Cart_MBC5;
-            break;
-        case 0x1A:
-            gb->mem.MBCModel = Cart_MBC5;
-            break;
-        case 0x1B:
-            gb->mem.MBCModel = Cart_MBC5;
-            gb->info.HasBattery = true;
-            break;
-        case 0x1C:
-            gb->mem.MBCModel = Cart_MBC5;
-            gb->info.HasRumble = true;
-            break;
-        case 0x1D:
-            gb->mem.MBCModel = Cart_MBC5;
-            gb->info.HasRumble = true;
-            break;
-        case 0x1E:
-            gb->mem.MBCModel = Cart_MBC5;
-            gb->info.HasBattery = true;
-            gb->info.HasRumble = true;
-            break;
-        case 0x1F: return "Pocket Camera not supported";
-        case 0xFD: return "Bandai TAMA5 not supported";
-        case 0xFE: return "Hudson HuC-3 not supported";
-        case 0xFF: return "Hudson HuC-1 not supported";
-        case 0x0B:
-        case 0x0C:
-        case 0x0D:
-            return "MMM01 not supported";
-            break;
-        default: return "Unknown ROM type";
-    }
-    switch (gb->mem.CartROM[0x148]) {
-        case 0x00: /* 256 Kbit */
-            gb->mem.CartROMSize = 32768;
-            break;
-        case 0x01: /* 512 Kbit */
-            gb->mem.CartROMSize = 65536;
-            break;
-        case 0x02: /* 1 Mbit */
-            gb->mem.CartROMSize = 131072;
-            break;
-        case 0x03: /* 2 Mbit */
-            gb->mem.CartROMSize = 262144;
-            break;
-        case 0x04: /* 4 Mbit */
-            gb->mem.CartROMSize = 524288;
-            break;
-        case 0x05: /* 8 Mbit */
-            gb->mem.CartROMSize = 1048576;
-            break;
-        case 0x06: /* 16 Mbit */
-            gb->mem.CartROMSize = 2097152;
-            break;
-        case 0x52: /* 9 Mbit */
-            gb->mem.CartROMSize = 1179648;
-            break;
-        case 0x53: /* 10 Mbit */
-            gb->mem.CartROMSize = 1310720;
-            break;
-        case 0x54: /* 12 Mbit */
-            gb->mem.CartROMSize = 1572864;
-            break;
-    }
-    switch (gb->mem.CartROM[0x149]) {
-        case 0: /* no RAM */
-            gb->mem.CartRAMSize = 0;
-            break;
-        case 1: /* 16 kBit */
-            gb->mem.CartRAMSize = 2048;
-            break;
-        case 2: /* 64 kBit */
-            gb->mem.CartRAMSize = 8192;
-            break;
-        case 3: /* 256 kBit */
-            gb->mem.CartRAMSize = 32768;
-            break;
-        case 4: /* 1 MBit */
-            gb->mem.CartRAMSize = 131072;
-            break;
-    }
-    /* All MBC2 chips contain 512x4bits RAM even though ROM[0x149] == 0 */
-    if(gb->mem.MBCModel == Cart_MBC2) {
-        gb->mem.CartRAMSize = 512;
-    }
-    {
-        uint16_t romChecksum = 0;
-        for(unsigned int i = 0; i < gb->mem.CartROMSize; i+= 1) {
-            romChecksum += gb->mem.CartROM[i];
-        }
-        /* ROM Checksum does not include the checksum bytes */
-        romChecksum -= gb->mem.CartROM[0x14E];
-        romChecksum -= gb->mem.CartROM[0x14F];
 
-        if(!skipChecksum && (((uint16_t)gb->mem.CartROM[0x14E] << 8u) | gb->mem.CartROM[0x14F]) != romChecksum) {
-            return "ROM Checksum incorrect";
-        }
-    }
-
-#if GAMEBOY_DEBUG
-    gb->debug.Context = NULL;
-    gb->debug.MemoryReadHook = NULL;
-    gb->debug.MemoryWriteHook = NULL;
-#endif
+    gb->mem.MBCModel = Cart_MBC1_16_8;
+    gb->mem.CartRAMSize = 0;
 
     return NULL;
 }
@@ -984,7 +705,6 @@ int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
         gb->mem.MBCModel = Cart_MBC1_16_8;
     }
 
-    gb->mem.MBCROMBank = 1;
     gb->buttons.Pressed = 0;
 
     gb->lcd.NewFrame = false;
@@ -1004,10 +724,6 @@ struct Gameboy* gameboy_alloc() {
   struct Gameboy* gb = (struct Gameboy*) malloc(sizeof(struct Gameboy));
   memset(gb, 0, sizeof(struct Gameboy));
   return gb;
-}
-
-void gameboy_load_rom(struct Gameboy* gb, char* rom_path) {
-  LoadROM(gb, rom_path);
 }
 
 void gameboy_load_ram(struct Gameboy* gb, unsigned int ram_size, uint8_t* bytes) {

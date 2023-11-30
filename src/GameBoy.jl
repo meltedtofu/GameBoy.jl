@@ -5,6 +5,9 @@ using OffsetArrays
 include("Processor.jl")
 using .Processor
 
+include("Carts.jl")
+using .Carts
+
 const gblib = abspath(joinpath(@__DIR__,
                                "..",
                                "deps",
@@ -61,14 +64,15 @@ Read and write bytes to the correct subsystem based on address.
 mutable struct Mmu
     workram::OffsetVector{UInt8, Vector{UInt8}}
     highram::OffsetVector{UInt8, Vector{UInt8}}
-    interrupt_enable::UInt8
+    interrupt_enable::UInt8 #TODO:  model this as an offset vector with size 1. same interface as everything else attached to the mmu
+    cart::Ref{Cartridge}
 
-    Mmu() = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
-                OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
-                0x00,
-               )
+    Mmu(cart) = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
+                    OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
+                    0x00,
+                    Ref{Cartridge}(cart),
+                   )
 end
-
 
 """
 The state of an emulator.
@@ -79,11 +83,11 @@ mutable struct Emulator
     mmu::Mmu
     frameStride::Int
 
-    Emulator() = new(ccall((:gameboy_alloc, gblib), Ptr{Cvoid}, ()),
-                     Cpu(),
-                     Mmu(),
-                     ccall((:gameboy_frame_stride, gblib), Int, ()),
-                    )
+    Emulator(cartpath) = new(ccall((:gameboy_alloc, gblib), Ptr{Cvoid}, ()),
+                             Cpu(),
+                             Mmu(Cartridge(cartpath; skipChecksum=true)),
+                             ccall((:gameboy_frame_stride, gblib), Int, ()),
+                            )
 end
 
 """
@@ -138,7 +142,6 @@ end
 Open a file on disk as a ROM.
 """
 function loadrom!(gb::Emulator, path::String; skip_checksum::Bool=false)
-    ccall((:gameboy_load_rom, gblib), Cvoid, (Ptr{Cvoid}, Cstring), gb.g, path)
     result = ccall((:gameboy_load, gblib), Cstring, (Ptr{Cvoid},Cint), gb.g, skip_checksum)
     if result != C_NULL
         free!(gb)
@@ -216,8 +219,12 @@ end
 
 function mmu_readDirect(gb::Emulator, addr::UInt16)::UInt8
     memp = ccall((:getMemory, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
-    if 0x00 <= addr < 0x0100 && ccall((:bootRomEnabled, gblib), Bool, (Ptr{Cvoid},), memp)
+    if 0x0000 <= addr < 0x0100 && ccall((:bootRomEnabled, gblib), Bool, (Ptr{Cvoid},), memp)
         bootrom[addr]
+    elseif 0x0000 <= addr < 0x8000
+        Carts.read(gb.mmu.cart, addr)
+    elseif 0xa000 <= addr < 0xc000
+        Carts.read(gb.mmu.card, addr)
     elseif 0xc000 <= addr < 0xe000
         gb.mmu.workram[addr - 0xc000]
     elseif 0xe000 <= addr < 0xfe00
@@ -252,6 +259,10 @@ function mmu_writeDirect!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
     dmap = ccall((:getDma, gblib), Ptr{DMA}, (Ptr{Cvoid},), gb.g)
 
     if addr > 0xffff
+    #elseif 0x0000 <= addr < 0x2000
+    # TODO: Cart RAM Bank Enabled
+    elseif 0x2000 <= addr < 0x6000
+        write!(gb.mmu.cart, addr, val)
     elseif 0xc000 <= addr < 0xe000
         gb.mmu.workram[addr - 0xc000] = val
     elseif 0xe000 <= addr < 0xfe00

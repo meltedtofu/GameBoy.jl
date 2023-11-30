@@ -5,8 +5,9 @@ using FileIO
 using Images
 
 function Emulator_(cartridge_name::String...)::Emulator
-    e = Emulator()
-    loadrom!(e, joinpath(@__DIR__, "golden", "roms", cartridge_name...); skip_checksum=true)
+    cartpath = joinpath(@__DIR__, "golden", "roms", cartridge_name...)
+    e = Emulator(cartpath)
+    loadrom!(e, cartpath; skip_checksum=true)
     reset!(e)
     e
 end

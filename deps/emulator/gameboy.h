@@ -33,7 +33,6 @@ enum {
     Interrupt_Mask = 0x1F,
 };
 enum {
-    Cart_MaxROMSize = 4 * 1024 * 1024,
     Cart_MaxRAMSize = 32 * 1024,
 
     Cart_MBC_None = 0,
@@ -95,11 +94,6 @@ struct Memory {
   /* 0xFF80 - 0xFFFE */
   //uint8_t HighRAM[127];
 
-  /* The cartridge ROM & RAM is typically banked into the main address
-   * space using a MBC chip */
-  unsigned int CartROMSize;
-  uint8_t CartROM[Cart_MaxROMSize];
-
   unsigned int CartRAMSize;
   uint8_t CartRAM[Cart_MaxRAMSize];
 
@@ -111,7 +105,6 @@ struct Memory {
 
   /* Model and state of the MBC chip */
   int MBCModel;
-  unsigned int MBCROMBank;
   unsigned int MBCRAMBank;
 
   struct RTC rtc;
