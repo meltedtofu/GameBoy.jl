@@ -55,15 +55,29 @@ mutable struct DMA
 end
 
 """
+Memory Mapping Unit
+Read and write bytes to the correct subsystem based on address.
+"""
+mutable struct Mmu
+    workram
+
+    Mmu() = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
+               )
+end
+
+
+"""
 The state of an emulator.
 """
 mutable struct Emulator
     g::Ptr{Cvoid}
     cpu::Cpu
+    mmu::Mmu
     frameStride::Int
 
     Emulator() = new(ccall((:gameboy_alloc, gblib), Ptr{Cvoid}, ()),
                      Cpu(),
+                     Mmu(),
                      ccall((:gameboy_frame_stride, gblib), Int, ()),
                     )
 end
@@ -161,7 +175,7 @@ function reset!(gb::Emulator)
     nothing
 end
 
-const bootrom = OffsetArrays.OffsetVector([
+const bootrom = OffsetVector([
     0x31,0xFE,0xFF,0xAF,0x21,0xFF,0x9F,0x32,0xCB,0x7C,0x20,0xFB,0x21,0x26,0xFF,0x0E,
     0x11,0x3E,0x80,0x32,0xE2,0x0C,0x3E,0xF3,0xE2,0x32,0x3E,0x77,0x77,0x3E,0xFC,0xE0,
     0x47,0x11,0x04,0x01,0x21,0x10,0x80,0x1A,0xCD,0x95,0x00,0xCD,0x96,0x00,0x13,0x7B,
@@ -197,8 +211,12 @@ end
 
 function mmu_readDirect(gb::Emulator, addr::UInt16)::UInt8
     memp = ccall((:getMemory, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
-    if addr < 0x0100 && ccall((:bootRomEnabled, gblib), Bool, (Ptr{Cvoid},), memp)
+    if 0x00 <= addr < 0x0100 && ccall((:bootRomEnabled, gblib), Bool, (Ptr{Cvoid},), memp)
         bootrom[addr]
+    elseif 0xc000 <= addr < 0xe000
+        gb.mmu.workram[addr - 0xc000]
+    elseif 0xe000 <= addr < 0xfe00
+        gb.mmu.workram[addr - 0xe000]
     else
         ccall((:mmu_readDirect, gblib),
               UInt8,
@@ -219,12 +237,15 @@ function mmu_read!(gb::Emulator, addr::UInt16)::UInt8
     end
 end
 
-function mmu_write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
-    clock_increment(gb)
-
+function mmu_writeDirect!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
     dmap = ccall((:getDma, gblib), Ptr{DMA}, (Ptr{Cvoid},), gb.g)
-    dma = unsafe_load(dmap)
-    if !dma.active || addr > 0xff00
+
+    if addr > 0xffff
+    elseif 0xc000 <= addr < 0xe000
+        gb.mmu.workram[addr - 0xc000] = val
+    elseif 0xe000 <= addr < 0xfe00
+        gb.mmu.workram[addr - 0xe000] = val
+    else
         ccall((:mmu_writeDirect, gblib),
               Cvoid,
               (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, UInt16, UInt8),
@@ -233,6 +254,17 @@ function mmu_write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
               dmap,
               addr,
               val)
+    end
+    nothing
+end
+
+function mmu_write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
+    clock_increment(gb)
+
+    dmap = ccall((:getDma, gblib), Ptr{DMA}, (Ptr{Cvoid},), gb.g)
+    dma = unsafe_load(dmap)
+    if !dma.active || addr > 0xff00
+        mmu_writeDirect!(gb, addr, val)
     end
     nothing
 end

@@ -249,11 +249,9 @@ uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
         /* 8K - Banked RAM Area */
         return mmu_readBankedRAM(mem, addr - 0xA000);
     } else if (addr < 0xE000) {
-        /* 8K - Internal RAM */
-        return mem->WorkRAM[addr - 0xC000];
+        assert(false);
     } else if (addr < 0xFE00) {
-        /* Mirror of internal RAM */
-        return mem->WorkRAM[addr - 0xE000];
+        assert(false);
     } else if (addr < 0xFE9F) {
         /* OAM */
         return mem->OAM[addr - 0xFE00];
@@ -386,11 +384,11 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
         // TODO: Writes to VRAM should be ignored when the LCD is being redrawn
         mem->VideoRAM[addr - 0x8000] = value;
     } else if (addr < 0xC000) {
+        assert(false);
         /* Banked RAM Area */
-        mmu_writeBankedRAM(mem, addr - 0xA000, value);
     } else if (addr < 0xE000) {
+        assert(false);
         /* Internal RAM */
-        mem->WorkRAM[addr - 0xC000] = value;
     } else if (addr < 0xFE00) {
         /* Mirror of internal RAM */
         mem->WorkRAM[addr - 0xE000] = value;
