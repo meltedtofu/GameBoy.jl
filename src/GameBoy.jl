@@ -1,6 +1,7 @@
 module GameBoy
 
-include("processor.jl")
+include("Processor.jl")
+
 using .Processor
 
 const gblib = abspath(joinpath(@__DIR__,
