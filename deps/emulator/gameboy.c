@@ -86,74 +86,74 @@ void video_update(struct Gameboy* gb, uint8_t scanline);
 void input_setUp(struct Buttons*, int button);
 void input_setDown(struct Buttons*, struct Memory*, int button);
 
-void clock_increment(struct Gameboy* gb)
-{
-    struct Clock* clock = &(gb->clock);
-    struct Memory* mem = &(gb->mem);
+// void clock_increment(struct Gameboy* gb)
+// {
+//     struct Clock* clock = &(gb->clock);
+//     struct Memory* mem = &(gb->mem);
+// 
+//     clock->TimerLoading = false;
+//     if(clock->TimerOverflow) {
+//         /* Delayed overflow effects */
+//         mem->IO[IO_InterruptFlag] |= Interrupt_TIMA;
+//         clock->TimerOverflow = false;
+// 
+//         /* In the next machine cycle the modulo is being loaded */
+//         mem->IO[IO_TimerCounter] = mem->IO[IO_TimerModulo];
+//         clock->TimerLoading = true;
+//     }
+//     clock_countChange(clock, mem, clock->CycleCount + 4);
+// }
 
-    clock->TimerLoading = false;
-    if(clock->TimerOverflow) {
-        /* Delayed overflow effects */
-        mem->IO[IO_InterruptFlag] |= Interrupt_TIMA;
-        clock->TimerOverflow = false;
+// static bool clock_getTimerBit(uint8_t control, uint16_t cycles)
+// {
+//     switch(control & 0x03) { /* Timer clock select */
+//         case 0: /* 4.096 KHz (1024 cycles) */
+//             return cycles & (1u << 9);
+//         case 1: /* 262.144 KHz (16 cycles) */
+//             return cycles & (1u << 3);
+//         case 2: /* 65.536 KHz (64 cycles) */
+//             return cycles & (1u << 5);
+//         case 3: /* 16.384 KHz (256 cycles) */
+//             return cycles & (1u << 7);
+//     }
+//     assert(0);
+// }
 
-        /* In the next machine cycle the modulo is being loaded */
-        mem->IO[IO_TimerCounter] = mem->IO[IO_TimerModulo];
-        clock->TimerLoading = true;
-    }
-    clock_countChange(clock, mem, clock->CycleCount + 4);
-}
+// static void clock_timerIncrement(struct Clock* clock, struct Memory* mem)
+// {
+//     uint8_t timer = mem->IO[IO_TimerCounter];
+//     if(timer == 0xFF) {
+//         clock->TimerOverflow = true;
+//     }
+//     mem->IO[IO_TimerCounter] = timer + 1;
+// }
 
-static bool clock_getTimerBit(uint8_t control, uint16_t cycles)
-{
-    switch(control & 0x03) { /* Timer clock select */
-        case 0: /* 4.096 KHz (1024 cycles) */
-            return cycles & (1u << 9);
-        case 1: /* 262.144 KHz (16 cycles) */
-            return cycles & (1u << 3);
-        case 2: /* 65.536 KHz (64 cycles) */
-            return cycles & (1u << 5);
-        case 3: /* 16.384 KHz (256 cycles) */
-            return cycles & (1u << 7);
-    }
-    assert(0);
-}
+// static void clock_updateTimerControl(struct Clock* clock, struct Memory* mem, uint8_t val)
+// {
+//     uint8_t old = mem->IO[IO_TimerControl];
+//     mem->IO[IO_TimerControl] = val;
+// 
+//     /* When disabled the bit to the falling edge detector is zero */
+//     bool const oldBit = (old & 0x04) && clock_getTimerBit(old, clock->CycleCount);
+//     bool const newBit = (val & 0x04) && clock_getTimerBit(val, clock->CycleCount);
+// 
+//     /* Check for falling edge */
+//     if(oldBit && !newBit) {
+//         clock_timerIncrement(clock, mem);
+//     }
+// }
 
-static void clock_timerIncrement(struct Clock* clock, struct Memory* mem)
-{
-    uint8_t timer = mem->IO[IO_TimerCounter];
-    if(timer == 0xFF) {
-        clock->TimerOverflow = true;
-    }
-    mem->IO[IO_TimerCounter] = timer + 1;
-}
-
-static void clock_updateTimerControl(struct Clock* clock, struct Memory* mem, uint8_t val)
-{
-    uint8_t old = mem->IO[IO_TimerControl];
-    mem->IO[IO_TimerControl] = val;
-
-    /* When disabled the bit to the falling edge detector is zero */
-    bool const oldBit = (old & 0x04) && clock_getTimerBit(old, clock->CycleCount);
-    bool const newBit = (val & 0x04) && clock_getTimerBit(val, clock->CycleCount);
-
-    /* Check for falling edge */
-    if(oldBit && !newBit) {
-        clock_timerIncrement(clock, mem);
-    }
-}
-
-static void clock_countChange(struct Clock *clock, struct Memory *mem, uint16_t new_value)
-{
-    uint8_t tac = mem->IO[IO_TimerControl];
-    if(tac & 0x04) { /* Timer enable */
-        if(!clock_getTimerBit(tac, new_value) && clock_getTimerBit(tac, clock->CycleCount)) {
-            clock_timerIncrement(clock, mem);
-        }
-    }
-    clock->CycleCount = new_value;
-    mem->IO[IO_Divider] = new_value >> 8u;
-}
+// static void clock_countChange(struct Clock *clock, struct Memory *mem, uint16_t new_value)
+// {
+//     uint8_t tac = mem->IO[IO_TimerControl];
+//     if(tac & 0x04) { /* Timer enable */
+//         if(!clock_getTimerBit(tac, new_value) && clock_getTimerBit(tac, clock->CycleCount)) {
+//             clock_timerIncrement(clock, mem);
+//         }
+//     }
+//     clock->CycleCount = new_value;
+//     mem->IO[IO_Divider] = new_value >> 8u;
+// }
 
 uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr);
 
@@ -217,7 +217,8 @@ uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
       assert(false);
     } else if (addr < 0xA000) {
         /* Video RAM */
-        return mem->VideoRAM[addr - 0x8000];
+        assert(false);
+        //return mem->VideoRAM[addr - 0x8000];
     } else if (addr < 0xC000) {
         /* 8K - Banked RAM Area */
         assert(false);
@@ -227,13 +228,15 @@ uint8_t mmu_readDirect(struct Memory* mem, uint16_t addr) {
         assert(false);
     } else if (addr < 0xFE9F) {
         /* OAM */
-        return mem->OAM[addr - 0xFE00];
+        assert(false);
+        //return mem->OAM[addr - 0xFE00];
     } else if (addr < 0xFF00) {
         /* Empty */
         assert(false);
     } else if (addr < 0xFF80) {
         /* IO registers */
-        return mem->IO[addr - 0xFF00];// | IOUnusedBits[addr - 0xFF00];
+        assert(false);
+        //return mem->IO[addr - 0xFF00];// | IOUnusedBits[addr - 0xFF00];
     } else if(addr < 0xFFFF) {
         assert(false);
     } else {
@@ -274,7 +277,8 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
     } else if (addr < 0xA000) {
         /* Video RAM */
         // TODO: Writes to VRAM should be ignored when the LCD is being redrawn
-        mem->VideoRAM[addr - 0x8000] = value;
+        //mem->VideoRAM[addr - 0x8000] = value;
+        assert(false);
     } else if (addr < 0xC000) {
         /* Banked RAM Area */
         assert(false);
@@ -286,7 +290,8 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
         assert(false);
     } else if (addr < 0xFE9F) {
         /* OAM */
-        mem->OAM[addr - 0xFE00] = value;
+        //mem->OAM[addr - 0xFE00] = value;
+        assert(false);
     } else if (addr < 0xFF00) {
         assert(false);
         /* Empty */
@@ -295,55 +300,50 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
         switch(addr - 0xFF00) {
             case IO_TimerCounter:
                 /* Writes to the timer counter whilst it is loading are ignored */
-                if(clock->TimerLoading) {
-                    mem->IO[IO_TimerCounter] = value;
-                    /* Writing to timer counter suppresses any pending overflow effects */
-                    clock->TimerOverflow = false;
-                }
+//                 if(clock->TimerLoading) {
+//                     mem->IO[IO_TimerCounter] = value;
+//                     /* Writing to timer counter suppresses any pending overflow effects */
+//                     clock->TimerOverflow = false;
+//                 }
                 break;
             case IO_TimerModulo:
-                mem->IO[IO_TimerModulo] = value;
-                /* Whilst the modulo is being loaded any writes are effective immediately */
-                if(clock->TimerLoading) {
-                    mem->IO[IO_TimerCounter] = value;
-                }
+//                 mem->IO[IO_TimerModulo] = value;
+//                 /* Whilst the modulo is being loaded any writes are effective immediately */
+//                 if(clock->TimerLoading) {
+//                     mem->IO[IO_TimerCounter] = value;
+//                 }
             case IO_TimerControl:
                 clock_updateTimerControl(clock, mem, value);
                 break;
             case IO_Divider:
-                clock_countChange(clock, mem, 0);
+//                 clock_countChange(clock, mem, 0);
                 break;
             case IO_InterruptFlag:
                 /* Top 5 bits of IF always read 1s */
-                mem->IO[IO_InterruptFlag] = value | 0xE0;
+//                 mem->IO[IO_InterruptFlag] = value | 0xE0;
                 break;
             case IO_BootROMDisable: /* Writing to this address disables the boot ROM */
                 assert(false);
                 break;
             case IO_OAMDMA: /* LCD OAM DMA transfer */
                 {
-                    if(value <= 0xF1) {
-                        dma->PendingSource = value;
-                        dma->DelayStart = true;
-                    } else {
-                        assert(false && "Invalid LCD OAM transfer range");
-                    }
+                    assert(false);
                 }
                 break;
             case IO_LCDStat:
-                {
-                    uint8_t cur = mem->IO[IO_LCDStat];
-                    mem->IO[IO_LCDStat] = (cur & 0x3) | (value & ~0x3);
-                }
+//                 {
+//                     uint8_t cur = mem->IO[IO_LCDStat];
+//                     mem->IO[IO_LCDStat] = (cur & 0x3) | (value & ~0x3);
+//                 }
                 break;
 
             case IO_LCDY: /* Current scanline -> writing resets it to zero */
                 {
-                    mem->IO[IO_LCDY] = 0;
+//                     mem->IO[IO_LCDY] = 0;
                 }
                 break;
 
-            default: mem->IO[addr - 0xFF00] = value; break;
+//             default: mem->IO[addr - 0xFF00] = value; break;
         }
     } else if (addr < 0xFFFF) {
         assert(false);
@@ -702,10 +702,10 @@ int gameboy_reset(struct Gameboy* gb)
     gb->buttons.Pressed = 0;
 
     gb->lcd.NewFrame = false;
-    gb->dma.PendingSource = 0;
-    gb->dma.DelayStart = false;
-    gb->dma.Source = 0;
-    gb->dma.Active = false;
+//     gb->dma.PendingSource = 0;
+//     gb->dma.DelayStart = false;
+//     gb->dma.Source = 0;
+//     gb->dma.Active = false;
     gb->lcd.FrameProgress = 0;
     return 0;
 }
@@ -760,13 +760,13 @@ struct Clock* getClock(struct Gameboy* gb) {
   return &(gb->clock);
 }
 
-uint8_t getIflag(struct Memory* mem) {
-  return mem->IO[IO_InterruptFlag];
-}
+// uint8_t getIflag(struct Memory* mem) {
+//   return mem->IO[IO_InterruptFlag];
+// }
 
-void setIF(struct Memory* mem, uint8_t iflag) {
-  mem->IO[IO_InterruptFlag] = iflag;
-}
+// void setIF(struct Memory* mem, uint8_t iflag) {
+//   mem->IO[IO_InterruptFlag] = iflag;
+// }
 
 struct Buttons* getButtons(struct Gameboy* gb) {
   return &(gb->buttons);
