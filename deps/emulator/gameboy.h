@@ -163,7 +163,7 @@ struct Gameboy
 };
 
 char const* gameboy_load(struct Gameboy*, bool skipChecksum);
-int gameboy_reset(struct Gameboy*, bool enableBootROM);
+int gameboy_reset(struct Gameboy*);
 int gameboy_step(struct Gameboy*);
 uint8_t gameboy_read(struct Gameboy* gb, uint16_t addr);
 void gameboy_write(struct Gameboy* gb, uint16_t addr, uint8_t value);

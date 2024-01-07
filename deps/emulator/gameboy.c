@@ -321,9 +321,7 @@ void mmu_writeDirect(struct Memory* mem, struct Clock* clock, struct DMA* dma, u
                 mem->IO[IO_InterruptFlag] = value | 0xE0;
                 break;
             case IO_BootROMDisable: /* Writing to this address disables the boot ROM */
-                {
-                    mem->BootROMEnabled = false;
-                }
+                assert(false);
                 break;
             case IO_OAMDMA: /* LCD OAM DMA transfer */
                 {
@@ -654,12 +652,11 @@ char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
 
     return NULL;
 }
-int gameboy_reset(struct Gameboy* gb, bool enableBootROM)
+int gameboy_reset(struct Gameboy* gb)
 {
     gb->clock.CycleCount = 0;
     gb->clock.TimerOverflow = false;
     gb->clock.TimerLoading = false;
-    gb->mem.BootROMEnabled = enableBootROM;
     /* Clear all VRAM - the bootrom does this. */
     memset(gb->mem.VideoRAM, 0, sizeof(gb->mem.VideoRAM));
     /* Initialise required IO registers */
@@ -772,10 +769,6 @@ uint8_t getIflag(struct Memory* mem) {
 
 void setIF(struct Memory* mem, uint8_t iflag) {
   mem->IO[IO_InterruptFlag] = iflag;
-}
-
-bool bootRomEnabled(struct Memory* mem) {
-  return mem->BootROMEnabled;
 }
 
 struct Buttons* getButtons(struct Gameboy* gb) {

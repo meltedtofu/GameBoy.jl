@@ -66,11 +66,13 @@ mutable struct Mmu
     highram::OffsetVector{UInt8, Vector{UInt8}}
     interrupt_enable::UInt8 #TODO:  model this as an offset vector with size 1. same interface as everything else attached to the mmu
     cart::Ref{Cartridge}
+    bootRomEnabled::Bool
 
     Mmu(cart) = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
                     OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
                     0x00,
                     Ref{Cartridge}(cart),
+                    true,
                    )
 end
 
@@ -150,8 +152,6 @@ function loadrom!(gb::Emulator, path::String; skip_checksum::Bool=false)
     nothing
 end
 
-# TODO: Use `unsafe_load` to directly deal with types from julia instead of requiring helper functions in the emulator library.
-
 """
 Grab a copy of the cartridge RAM.
 This captures the save state.
@@ -177,9 +177,10 @@ Power cycle the emulator
 """
 function reset!(gb::Emulator)
     enableBootRom = true
-    ccall((:gameboy_reset, gblib), Cvoid, (Ptr{Cvoid}, Bool), gb.g, enableBootRom)
+    ccall((:gameboy_reset, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
     gb.cpu = Cpu(enableBootRom)
     gb.mmu.interrupt_enable = 0x00
+    gb.mmu.bootRomEnabled = enableBootRom
     nothing
 end
 
@@ -219,7 +220,7 @@ end
 
 function mmu_readDirect(gb::Emulator, addr::UInt16)::UInt8
     memp = ccall((:getMemory, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
-    if 0x0000 <= addr < 0x0100 && ccall((:bootRomEnabled, gblib), Bool, (Ptr{Cvoid},), memp)
+    if 0x0000 <= addr < 0x0100 && gb.mmu.bootRomEnabled
         bootrom[addr]
     elseif 0x0000 <= addr < 0x8000
         Carts.read(gb.mmu.cart, addr)
@@ -268,6 +269,8 @@ function mmu_writeDirect!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
     elseif 0xe000 <= addr < 0xfe00
         gb.mmu.workram[addr - 0xe000] = val
     elseif 0xfe9f <= addr < 0xff00
+    elseif 0xff50 == addr
+        gb.mmu.bootRomEnabled = false
     elseif 0xff80 <= addr < 0xffff
         gb.mmu.highram[addr - 0xff80] = val
     elseif 0xffff == addr
