@@ -81,7 +81,7 @@ static uint8_t const IOUnusedBits[128] = {
     // ...
 };
 static void clock_countChange(struct Clock* clock, struct Memory* mem, uint16_t new_value);
-static void dma_update(struct DMA*, struct Memory*);
+void dma_update(struct DMA*, struct Memory*);
 void video_update(struct Gameboy* gb, uint8_t scanline);
 void input_setUp(struct Buttons*, int button);
 void input_setDown(struct Buttons*, struct Memory*, int button);
@@ -90,8 +90,6 @@ void clock_increment(struct Gameboy* gb)
 {
     struct Clock* clock = &(gb->clock);
     struct Memory* mem = &(gb->mem);
-    struct DMA* dma = &(gb->dma);
-    struct LCD* lcd = &(gb->lcd);
 
     clock->TimerLoading = false;
     if(clock->TimerOverflow) {
@@ -104,7 +102,6 @@ void clock_increment(struct Gameboy* gb)
         clock->TimerLoading = true;
     }
     clock_countChange(clock, mem, clock->CycleCount + 4);
-    dma_update(dma, mem);
 }
 
 static bool clock_getTimerBit(uint8_t control, uint16_t cycles)
@@ -361,7 +358,7 @@ uint8_t gameboy_read(struct Gameboy* gb, uint16_t addr)
     return mmu_readDirect(&(gb->mem), addr);
 }
 
-static void dma_update(struct DMA* dma, struct Memory* mem)
+void dma_update(struct DMA* dma, struct Memory* mem)
 {
     if(dma->PendingSource) {
         if(!dma->DelayStart) {

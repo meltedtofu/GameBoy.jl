@@ -212,6 +212,11 @@ end
 
 function clock_increment(gb::Emulator)::Nothing
     ccall((:clock_increment, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
+    
+    dmap = ccall((:getDma, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
+    memp = ccall((:getMemory, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
+    ccall((:dma_update, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid},), dmap, memp)
+    
     # Video runs at 1 pixel per clock (4 per machine cycle)
     for _ ∈ 1:4
         video_step(gb)
