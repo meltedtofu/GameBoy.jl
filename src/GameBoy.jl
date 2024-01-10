@@ -32,8 +32,10 @@ end
 
 mutable struct Sprite
     x::UInt8
-    pixels::Vector{UInt8} # 2 bytes
+    pixels::OffsetVector{UInt8, Vector{UInt8}} # 2 bytes
     attrs::UInt8
+    
+    Sprite() = new(0, OffsetVector(zeros(UInt8, 2), OffsetArrays.Origin(0)), 0)
 end
 
 """
@@ -47,19 +49,19 @@ mutable struct Video
     buffer::Matrix{UInt8}
 
     # The pixels to send to SDl as AARGGBB values interpreted through the default palette
-    frame::Matrix{UInt8}
+    frame::Matrix{UInt32}
 
     newframe::Bool
 
-    scanline_sprites::Vector{Sprite}
-    num_sprites::UInt
-    curx::UInt
+    scanline_sprites::OffsetVector{Sprite, Vector{Sprite}}
+    num_sprites::UInt8
+    curx::UInt8
     
     Video() = new(0,
-                  [0x00 0x00], # TODO: What size should this be?
-                  [0x00 0x00], # TODO: What size should this be?
+                  Matrix{UInt8}(undef, 160, 144),
+                  Matrix{UInt32}(undef, 144, 160),
                   false,
-                  [],
+                  OffsetVector(fill(Sprite(), 10), OffsetArrays.Origin(0)),
                   0,
                   0,
                  )
@@ -169,7 +171,7 @@ mutable struct Emulator
             Mmu(Cartridge(cartpath; skipChecksum=true), clock),
             DMA(),
             clock,
-            ccall((:gameboy_frame_stride, gblib), Int, ()),
+            160 * 4,
             Video(),
            )
     end
@@ -206,6 +208,7 @@ end
 
 Base.:+(a::UInt16, b::IORegisters)::UInt16 = a + UInt16(b)
 Base.to_index(reg::IORegisters) = Int(reg)
+Base.:|(a::UInt8, b::Interrupt)::UInt8 = a | UInt8(b)
     
 """
 All of the buttons that can be pressed
@@ -319,13 +322,128 @@ const bootrom = OffsetVector([
     0xF5,0x06,0x19,0x78,0x86,0x23,0x05,0x20,0xFB,0x86,0x20,0xFE,0x3E,0x01,0xE0,0x50
    ], OffsetArrays.Origin(0))
 
-function video_update!(gb::Emulator, scanline::UInt8)
+function video_tileLineAddress(index::UInt8, y::UInt16, lowBank::Bool)
+    # Addresses relative to video ram base address
+    addr = 0x0000
+    if lowBank
+        addr = index * 16
+    else
+        addr = 0x1000 + reinterpret(Int8, index) * 16
+    end
+    
+    addr + 2y
+end
+
+function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
+    spriteHeight = gb.mmu.io[IOLCDControl] & 0x04 > 0 ? 16 : 8
+    
+    nsprites = 0
+    i = 0x00
+    while i < 160
+        ypos = gb.mmu.oam[i]
+        xpos = gb.mmu.oam[i+1]
+        if 0 < ypos < 160 && xpos < 168 # on screen
+            if ypos <= scanline + 16 < ypos + spriteHeight # in scanline
+                # insert the sprite into the list, keeping the list in priority order
+                inspos = nsprites
+                while inspos > 0 && sprites[inspos - 1].x > xpos
+                    if inspos < 10
+                        sprites[inspos] = sprites[inspos - 1]
+                    end
+                    inspos -= 1
+                end
+                if inspos < 10
+                    tile = gb.mmu.oam[i+0x02]
+                    attr = gb.mmu.oam[i+0x03]
+                    if spriteHeight == 16
+                        tile &= 0xfe
+                    end
+                    
+                    tiley = scanline + 16 - ypos
+                    if attr & 0x40 # y flip
+                        tiley = (spriteHeight - 1) - tiley
+                    end
+                    
+                    tileaddr = video_tileLineAddress(tile, tiley, true)
+                    
+                    sprites[inspos].x = xpos;
+                    sprites[inspos].pixels[0] = gb.mmu.videoram[tileaddr]
+                    sprites[inspos].pixels[1] = gb.mmu.videoram[tileaddr + 1]
+                    sprites[inspos].attrs = attr
+                    
+                    if nsprites < 10
+                        nsprites += 1
+                    end
+                end
+            end
+        end
+        i += 4
+    end
+    
+    gb.video.num_sprites = nsprites
+
+    nothing
+end
+
+function video_linePixel(l1::UInt8, l2::UInt8, x::UInt16)::UInt8
+    (((l1 << x) & 0x80) >> 7) | (((l2 << x) & 0x80) >> 6)
+end
+
+function video_mapPixel(gb::Emulator, hiMap::Bool, loTiles::Bool, x::UInt16, y::UInt16)::UInt8
+    tileIndex = gb.mmu.videoram[(hiMap ? 0x1c00 : 0x1800) + ((y ÷ 8)*32) + (x ÷ 8)]
+    addr = video_tileLineAddress(tileIndex, y%0x08, loTiles)
+    video_linePixel(gb.mmu.videoram[addr], gb.mmu.videoram[addr+1], x%0x0008)
+end
+
+function video_paletteLookup(pixel::UInt8, palette::UInt8)
+    (palette >> (pixel*2)) & 0x03
+end
+
+function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
+    lcdc = gb.mmu.io[IOLCDControl]
+    hiMapBg = lcdc & 0x08 > 0 
+    hiMapWin = lcdc & 0x40 > 0
+    bgEnable = lcdc & 0x01 > 0
+    winEnable = lcdc & 0x20 > 0
+    spriteEnable = lcdc & 0x02 > 0
+    loTiles = lcdc & 0x10 > 0
+    
+    wy = gb.mmu.io[IOWindowY]
+    wx = gb.mmu.io[IOWindowX]
+    
+    winEnable = winEnable && wx < 167 && wy < 144 && wy <= scanline
+    spriteEnable = spriteEnable && gb.video.num_sprites > 0
+
+    if winEnable || bgEnable || spriteEnable
+        scy = gb.mmu.io[IOScrollY]
+        scx = gb.mmu.io[IOScrollX]
+        
+        bgPixel = 0x00
+        if winEnable && x + 0x07 >= wx
+            bgPixel = video_mapPixel(gb, hiMapWin, loTiles, x+7-wx, scanline-wy)
+        elseif bgEnable
+            bgPixel = video_mapPixel(gb, hiMapBg, loTiles, (x+scx)%0x0100, (scanline+scy)%0x0100)
+        end
+
+        finalColor = video_paletteLookup(bgPixel, gb.mmu.io[IOBackgroundPalette])
+
+        if spriteEnable
+            # TODO: Implement this section
+        end
+
+        gb.video.buffer[x+0x01, scanline+0x01] = finalColor
+    end
+
+    nothing
+end
+
+function video_update!(gb::Emulator, scanline::UInt8)::Nothing
     # assert scanline <= 154
     
     lcdOn = gb.mmu.io[IOLCDControl] & 0x80 > 0x00
     gb.mmu.io[IOLCDY] = scanline
     
-    stat = gb.mu.io[IOLCDStat]
+    stat = gb.mmu.io[IOLCDStat]
     
     if lcdOn
         if scanline == gb.mmu.io[IOLCDYCompare]
@@ -347,31 +465,37 @@ function video_update!(gb::Emulator, scanline::UInt8)
             gb.mmu.io[IOLCDStat] = (stat & ~0x03) | 0x01
             gb.mmu.io[IOInterruptFlag] |= InterruptVBlank
             if gb.mmu.io[IOLCDControl] & 0x80 == 0
-                # TODO: Clear lcd buffer. set it to all 0x00
+                fill!(gb.video.buffer, 0x00)
             end
             gb.video.newframe = true
         end
     else
         scanlineProgress = gb.video.frameprogress % 456
         
-        if scanlineprogress < 92
+        if scanlineProgress < 92
             if lcdMode != 2
                 gb.mmu.io[IOLCDStat] = (stat & 0x03) | 2
                 if stat & 0x20 > 0x00
                     gb.mmu.io[IOInterruptFlag] |= InterruptLCDC
                 end
-                video_readSprites(gb, scanline) # TODO: Implement video_readSprites
+                video_readSprites!(gb, scanline)
                 gb.video.curx = 0
             end
-        elseif scanlineprogres < 160 + 92
+        elseif scanlineProgress < 160 + 92
             gb.mmu.io[IOLCDStat] = (stat & ~0x03) | 3
             if lcdOn
-            # TODO: Implement loop calling video_drawPixel (and implement that function)
+                while gb.video.curx < scanlineProgress - 92
+                    video_drawPixel!(gb, scanline, gb.video.curx)
+                    gb.video.curx += 1
+                end
             end
         else
             if lcdMode != 0
                 if lcdOn
-                # TODO: Implement loop calling video_drawPixel (and implement that function)
+                    while gb.video.curx < 160
+                        video_drawPixel!(gb, scanline, gb.video.curx) 
+                        gb.video.curx += 1
+                    end
                 end
                 gb.mmu.io[IOLCDStat] = (stat & ~0x03)
                 if stat & 0x08 > 0x00
@@ -381,29 +505,31 @@ function video_update!(gb::Emulator, scanline::UInt8)
         end
     end
     
-    gb.video.frameprogress = (gb.video.frameprogres + 1) % 70224
+    gb.video.frameprogress = (gb.video.frameprogress + 1) % 70224
+    
+    nothing
 end
 
 function video_step(gb::Emulator)::Nothing
     scanline = UInt8(gb.video.frameprogress ÷ 456)
-    video_update(gb, scanline)
+    video_update!(gb, scanline)
 end
 
 function clock_getTimerBit(control::UInt8, cycles::UInt16)::Bool
     switch = control & 0x03
     if switch == 0x00
-        cycles & (0x0001 << 9)
+        cycles & (0x0001 << 9) > 0
     elseif switch == 0x01
-        cycles & (0x0001 << 3)
+        cycles & (0x0001 << 3) > 0
     elseif switch == 0x02
-        cycles & (0x0001 << 5)
+        cycles & (0x0001 << 5) > 0
     elseif switch == 0x03
-        cycles & (0x0001 << 7)
+        cycles & (0x0001 << 7) > 0
     end
 end
 
 function clock_timerIncrement!(clock::Clock, mmu::Mmu)::Nothing
-    timer = mu.io[IOTimerCounter]
+    timer = mmu.io[IOTimerCounter]
     if timer == 0xff
         clock.overflow = true
     end
@@ -415,7 +541,7 @@ function clock_countChange!(clock::Clock, mmu::Mmu, newval::UInt16)
     tac = mmu.io[IOTimerControl]
     if tac & 0x04 > 0x00
         if !clock_getTimerBit(tac, newval) && clock_getTimerBit(tac, clock.cycles)
-            clock_timerIncrement(clock, mmu)
+            clock_timerIncrement!(clock, mmu)
         end
     end
     clock.cycles = newval
@@ -430,7 +556,7 @@ function clock_increment(gb::Emulator)::Nothing
         gb.clock.overflow = false
 
         # modulo is being loaded in next machine cycle
-        gb.mmu.io[IOTimerCounter] = mmu.io[IOTimerModulo]
+        gb.mmu.io[IOTimerCounter] = gb.mmu.io[IOTimerModulo]
         gb.clock.loading = true
     end
     
@@ -453,7 +579,7 @@ function clock_updateTimerControl!(clock::Clock, mmu::Mmu, val::UInt8)::Nothing
     
     # check for falling edge
     if oldbit && !newbit
-        clock_timerIncrement(clock, mmu)
+        clock_timerIncrement!(clock, mmu)
     end
     nothing
 end
@@ -517,7 +643,7 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
         clock_countChange!(mmu.clock[], mmu, 0)
     elseif 0xff00 + IOTimerCounter == addr
         if mmu.clock[].loading
-            mmu.io[IOTimerCounter] = value
+            mmu.io[IOTimerCounter] = val
             mmu.clock[].overflow = false
         end
     elseif 0xff00 + IOTimerModulo == addr
@@ -529,7 +655,7 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     elseif 0xff00 + IOTimerControl == addr
         clock_updateTimerControl!(mmu.clock[], mmu, val)
     elseif 0xff00 + IOInterruptFlag == addr
-        mmu.io[IOInterruptFlag] = value | 0xe0
+        mmu.io[IOInterruptFlag] = val | 0xe0
     elseif 0xff00 + IOLCDStat == addr
         mmu.io[IOLCDStat] = (mmu.io[IOLCDStat] & 0x03) | (val & ~0x03)
     elseif 0xff00 + IOLCDY == addr
@@ -1942,6 +2068,10 @@ function doframe!(gb::Emulator)::Ptr{Cvoid}
         handleInterrupts(gb, gb.cpu)
         cpu_step(gb, gb.cpu)
 
+        if gb.video.newframe
+            gb.video.newframe = false
+        end
+        
         pixels = ccall((:updateFrameBuffer, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), lcd);
         if pixels != C_NULL
             return pixels
