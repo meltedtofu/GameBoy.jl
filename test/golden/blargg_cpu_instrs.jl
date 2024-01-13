@@ -6,14 +6,7 @@
         doframe!(e)
     end
 
-    pixelsraw = doframe!(e)
-    pixelsptr = convert(Ptr{UInt32}, pixelsraw)
-    pixels = Matrix{UInt32}(undef, 144, 160)
-    for j in 1:144
-        for i in 1:160
-            pixels[j, i] = unsafe_load(pixelsptr, i + (j-1)*160)
-        end
-    end
+    pixels = doframe!(e)
 
     expected = load(joinpath(@__DIR__, "screens", "blargg_cpu_instrs.png"))
     @test expected == reinterpret(BGRA{N0f8}, pixels)

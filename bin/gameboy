@@ -11,6 +11,9 @@ case $1 in
     julia --color=yes --depwarn=no --project=@. --startup-file=no -q -t2 -e 'using GameBoy, LiveServer; servedocs(;foldername=".", launch_browser=true)'
     popd
     ;;
+  test)
+    julia --color=yes --depwarn=no --project=@. --startup-file=no -q -t3 -e 'using Pkg; Pkg.test()'
+    ;;
   *)
     echo "unknown subcommand $1"
     exit 1

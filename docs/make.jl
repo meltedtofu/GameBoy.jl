@@ -33,8 +33,9 @@ end
 readmeifchanged()
 
 makedocs(sitename = "GameBoy.jl",
-         format = Documenter.HTML(),
+         format = Documenter.HTML(repolink="gameboyjl.meltedtofu.com", edit_link=nothing),
          modules = [GameBoy, GameBoy.Processor, GameBoy.Carts],
+         remotes = nothing,
          pages = [
              "Overview" => "index.md",
              "code.md",
