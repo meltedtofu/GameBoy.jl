@@ -2055,26 +2055,29 @@ function handleInterrupts(gb::Emulator, cpu::Cpu)
     end
 end
 
+# const palette = [0xFFFFFFFF, 0xFFAAAAAA, 0xFF555555, 0xFF000000] # Grayscale
+const palette = [0xFFC4CFA1, 0xFF8B956D, 0xFF4D543C, 0xFF1F1F1F] # Pocket
+# const palette = [0xFF9BBC0F, 0xFF8BAC0F, 0xFF306230, 0xFF0F380F] # DMG
+
 """
 Run one frame of emulation.
 """
-function doframe!(gb::Emulator)::Ptr{Cvoid}
+function doframe!(gb::Emulator)::Matrix{UInt32}
     while true
-        mem = ccall((:getMemory, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
-        buttons = ccall((:getButtons, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
-        lcd = ccall((:getLCD, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), gb.g)
-
-        ccall((:input_update, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), mem, buttons)
+        # TODO: Implement input_update
+#        ccall((:input_update, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), mem, buttons)
         handleInterrupts(gb, gb.cpu)
         cpu_step(gb, gb.cpu)
 
         if gb.video.newframe
             gb.video.newframe = false
-        end
-        
-        pixels = ccall((:updateFrameBuffer, gblib), Ptr{Cvoid}, (Ptr{Cvoid},), lcd);
-        if pixels != C_NULL
-            return pixels
+            for y in 1:144
+                for x in 1:160
+                    pixel = gb.video.buffer[x,y]
+                    gb.video.frame[y, x] = palette[(pixel & 0x03 + 0x01)]
+                end
+            end            
+            return gb.video.frame
         end
     end
 end
