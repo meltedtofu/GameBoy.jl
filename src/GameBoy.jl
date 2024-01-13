@@ -22,156 +22,6 @@ end
     InterruptMask=0x1f
 end
 
-mutable struct Sprite
-    x::UInt8
-    pixels::OffsetVector{UInt8, Vector{UInt8}} # 2 bytes
-    attrs::UInt8
-    
-    Sprite() = new(0, OffsetVector(zeros(UInt8, 2), OffsetArrays.Origin(0)), 0)
-end
-
-"""
-Video subsystem
-"""
-mutable struct Video
-    frameprogress::UInt
-
-    # Bits 0-1 = color (0 = darkest, 3 = lightest)
-    # Remaining Bits are zero
-    buffer::Matrix{UInt8}
-
-    # The pixels to send to SDl as AARGGBB values interpreted through the default palette
-    frame::Matrix{UInt32}
-
-    newframe::Bool
-
-    scanline_sprites::OffsetVector{Sprite, Vector{Sprite}}
-    num_sprites::UInt8
-    curx::UInt8
-    
-    Video() = new(0,
-                  Matrix{UInt8}(undef, 160, 144),
-                  Matrix{UInt32}(undef, 144, 160),
-                  false,
-                  OffsetVector(fill(Sprite(), 10), OffsetArrays.Origin(0)),
-                  0,
-                  0,
-                 )
-end
-
-"""
-Main System Clock
-"""
-mutable struct Clock
-    cycles::UInt16
-    overflow::Bool
-    loading::Bool
-    
-    Clock() = new(0, false, false)
-end
-
-
-function reset(c::Clock)
-    c.cycles = 0
-    c.overflow = false
-    c.loading = false
-end
-
-"""
-Direct Memory Access metadata
-"""
-mutable struct DMA
-    delaystart::Bool
-    pendingsource::UInt8
-    source::UInt16 # source for currently running dma. 0 if not active
-    active::Bool # Is OAM DMA active on current cycle?
-    
-    DMA() = new(false, 0, 0, false)
-end
-
-function reset!(dma::DMA)::Nothing
-    dma.delaystart = false
-    dma.pendingsource = 0
-    dma.source = 0
-    active = false
-    nothing
-end
-
-"""
-Memory Mapping Unit
-Read and write bytes to the correct subsystem based on address.
-"""
-mutable struct Mmu
-    workram::OffsetVector{UInt8, Vector{UInt8}}
-    highram::OffsetVector{UInt8, Vector{UInt8}}
-    videoram::OffsetVector{UInt8, Vector{UInt8}}
-    interrupt_enable::UInt8 #TODO:  model this as an offset vector with size 1. same interface as everything else attached to the mmu
-    oam::OffsetVector{UInt8, Vector{UInt8}}
-    io::OffsetVector{UInt8, Vector{UInt8}}
-    cart::Ref{Cartridge}
-    clock::Ref{Clock}
-    dma::Ref{DMA}
-    bootRomEnabled::Bool
-
-    Mmu(cart, clock, dma) = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
-                                OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
-                                OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
-                                0x00,
-                                OffsetVector(zeros(UInt8, 0xa0), OffsetArrays.Origin(0)),
-                                OffsetVector(zeros(UInt8, 0x80), OffsetArrays.Origin(0)),
-                                Ref{Cartridge}(cart),
-                                Ref{Clock}(clock),
-                                Ref{DMA}(dma),
-                                true,
-                               )
-end
-
-function step!(dma::DMA, mmu::Mmu)::Nothing
-    if dma.pendingsource > 0
-        if !dma.delaystart
-            dma.source = dma.pendingsource << 8
-            dma.pendingsource = 0   
-        end
-        dma.delaystart = false
-    end
-    
-    if dma.source > 0 && (dma.source&0xff) < 0xa0
-        dma.active = true
-        mmu.oam[dma.source & 0xff] = mmu_readDirect(mmu, dma.source)
-        dma.source += 1
-    else
-        dma.active = false
-    end
-    
-    nothing
-end
-
-"""
-The state of an emulator.
-"""
-mutable struct Emulator
-    cpu::Cpu
-    mmu::Mmu
-    dma::DMA
-    clock::Clock
-    frameStride::Int
-    video::Video
-    buttons::UInt8
-
-    function Emulator(cartpath)
-        clock = Clock()
-        dma = DMA()
-        new(Cpu(),
-            Mmu(Cartridge(cartpath; skipChecksum=true), clock, dma),
-            dma,
-            clock,
-            160 * 4,
-            Video(),
-            0,
-           )
-    end
-end
-
 """
 Addresses of IO devices relative to 0xff00
 
@@ -199,6 +49,207 @@ Intentionally skipping sound since it is unimplemented in this emulator
     IOWindowY=0x4a
     IOWindowX=0x4b
     IOBootRomDisable=0x50
+end
+
+"""
+Random Access Memory.
+"""
+mutable struct Ram
+    bytes::OffsetVector{UInt8, Vector{UInt8}}
+    
+    Ram(size::UInt16) = Ram(zeros(UInt8, size))
+    Ram(data::Vector{UInt8}) = new(OffsetVector(data, OffsetArrays.Origin(0)))
+end
+
+function reset!(ram::Ram)::Nothing
+    fill!(ram.bytes, 0x00)
+    nothing
+end
+
+read(ram::Ref{Ram}, addr::UInt16)::UInt8 = read(ram[])
+read(ram::Ram, addr::IORegisters)::UInt8 = read(ram, UInt16(addr))
+read(ram::Ram, addr::UInt16)::UInt8 = ram.bytes[addr]
+write!(ram::Ram, addr::IORegisters, v::UInt8)::Nothing = write!(ram, UInt16(addr), v)
+write!(ram::Ref{Ram}, addr::UInt16, v::UInt8)::Nothing = write!(ram[], addr, v)
+function write!(ram::Ram, addr::UInt16, v::UInt8)::Nothing
+    ram.bytes[addr] = v
+    nothing
+end
+
+mutable struct Sprite
+    x::UInt8
+    pixels::OffsetVector{UInt8, Vector{UInt8}} # 2 bytes
+    attrs::UInt8
+    
+    Sprite() = new(0, OffsetVector(zeros(UInt8, 2), OffsetArrays.Origin(0)), 0)
+end
+
+"""
+Video subsystem
+"""
+mutable struct Video
+    frameprogress::UInt
+    ram::Ram
+
+    # Bits 0-1 = color (0 = darkest, 3 = lightest)
+    # Remaining Bits are zero
+    buffer::Matrix{UInt8}
+
+    # The pixels to send to SDl as AARGGBB values interpreted through the default palette
+    frame::Matrix{UInt32}
+
+    newframe::Bool
+
+    scanline_sprites::OffsetVector{Sprite, Vector{Sprite}}
+    num_sprites::UInt8
+    curx::UInt8
+    
+    Video() = new(0,
+                  Ram(0x2000),
+                  Matrix{UInt8}(undef, 160, 144),
+                  Matrix{UInt32}(undef, 144, 160),
+                  false,
+                  OffsetVector(fill(Sprite(), 10), OffsetArrays.Origin(0)),
+                  0,
+                  0,
+                 )
+end
+
+function reset!(v::Video)::Nothing
+    reset!(v.ram)
+    v.newframe = false
+    v.frameprogress = 0
+    nothing
+end
+
+read(v::Ref{Video}, addr::UInt16)::UInt8 = read(v[], addr)
+read(v::Video, addr::UInt16)::UInt8 = read(v.ram, addr)
+write!(v::Ref{Video}, addr::UInt16, val::UInt8):: Nothing = write!(v[], addr, val)
+write!(v::Video, addr::UInt16, val::UInt8)::Nothing = write!(v.ram, addr, val)
+
+"""
+Main System Clock
+"""
+mutable struct Clock
+    cycles::UInt16
+    overflow::Bool
+    loading::Bool
+    
+    Clock() = new(0, false, false)
+end
+
+
+function reset!(c::Clock)
+    c.cycles = 0
+    c.overflow = false
+    c.loading = false
+end
+
+"""
+Direct Memory Access metadata
+"""
+mutable struct DMA
+    delaystart::Bool
+    pendingsource::UInt8
+    source::UInt16 # source for currently running dma. 0 if not active
+    active::Bool # Is OAM DMA active on current cycle?
+    
+    DMA() = new(false, 0, 0, false)
+end
+
+function reset!(dma::DMA)::Nothing
+    dma.delaystart = false
+    dma.pendingsource = 0
+    dma.source = 0
+    active = false
+    nothing
+end
+
+
+
+"""
+Memory Mapping Unit
+Read and write bytes to the correct subsystem based on address.
+"""
+mutable struct Mmu
+    workram::Ram
+    highram::Ram
+    interrupt_enable::UInt8 #TODO:  model this as an offset vector with size 1. same interface as everything else attached to the mmu
+    oam::Ram
+    io::Ram
+    cart::Ref{Cartridge}
+    clock::Ref{Clock}
+    dma::Ref{DMA}
+    video::Ref{Video}
+    bootRomEnabled::Bool
+
+    Mmu(cart, clock, dma, video) = new(Ram(0x2000),
+                                       Ram(0x007f),
+                                       0x00,
+                                       Ram(0x00a0),
+                                       Ram(0x0080),
+                                       Ref{Cartridge}(cart),
+                                       Ref{Clock}(clock),
+                                       Ref{DMA}(dma),
+                                       Ref{Video}(video),
+                                       true,
+                                      )
+end
+
+function reset!(mmu::Mmu, enableBootRom::Bool)::Nothing
+    reset!(mmu.workram)
+    reset!(mmu.highram)
+    mmu.interrupt_enable = 0x00
+    mmu.bootRomEnabled = enableBootRom
+    nothing
+end
+
+function step!(dma::DMA, mmu::Mmu)::Nothing
+    if dma.pendingsource > 0
+        if !dma.delaystart
+            dma.source = dma.pendingsource << 8
+            dma.pendingsource = 0   
+        end
+        dma.delaystart = false
+    end
+    
+    if dma.source > 0 && (dma.source&0xff) < 0xa0
+        dma.active = true
+        write!(mmu.oam, dma.source & 0xff, mmu_readDirect(mmu, dma.source))
+        dma.source += 1
+    else
+        dma.active = false
+    end
+    
+    nothing
+end
+
+"""
+The state of an emulator.
+"""
+mutable struct Emulator
+    cpu::Cpu
+    mmu::Mmu
+    dma::DMA
+    clock::Clock
+    frameStride::Int
+    video::Video
+    buttons::UInt8
+
+    function Emulator(cartpath)
+        clock = Clock()
+        dma = DMA()
+        video = Video()
+
+        new(Cpu(),
+            Mmu(Cartridge(cartpath; skipChecksum=true), clock, dma, video),
+            dma,
+            clock,
+            160 * 4,
+            video,
+            0,
+           )
+    end
 end
 
 Base.:+(a::UInt16, b::IORegisters)::UInt16 = a + UInt16(b)
@@ -269,36 +320,33 @@ Power cycle the emulator
 function reset!(gb::Emulator)
     # TODO: move reset to per component with multiple dispatch
     enableBootRom = true
-    gb.clock.cycles = 0
-    gb.clock.overflow = false
-    gb.clock.loading = false
-    fill!(gb.mmu.videoram, 0x00)
-    gb.mmu.io[IOJoypad] = 0xcf
-    gb.mmu.io[IOSerialControl] = 0x7e
-    gb.mmu.io[IOTimerCounter] = 0x00
-    gb.mmu.io[IOTimerModulo] = 0x00
-    gb.mmu.io[IOTimerControl] = 0x00
-    gb.mmu.io[IOLCDControl] = 0x91
-    gb.mmu.io[IOScrollY] = 0x00
-    gb.mmu.io[IOScrollX] = 0x00
-    gb.mmu.io[IOLCDYCompare] = 0x00
-    gb.mmu.io[IOBackgroundPalette] = 0xfc
-    gb.mmu.io[IOObjectPalette0] = 0xff
-    gb.mmu.io[IOObjectPalette1] = 0xff
-    gb.mmu.io[IOWindowY] = 0x00
-    gb.mmu.io[IOWindowX] - 0x00
+    reset!(gb.clock)
+    reset!(gb.video)
+    reset!(gb.mmu, enableBootRom)
+    
+    write!(gb.mmu.io, IOJoypad, 0xcf)
+    write!(gb.mmu.io, IOSerialControl, 0x7e)
+    write!(gb.mmu.io, IOTimerCounter, 0x00)
+    write!(gb.mmu.io, IOTimerModulo, 0x00)
+    write!(gb.mmu.io, IOTimerControl, 0x00)
+    write!(gb.mmu.io, IOLCDControl, 0x91)
+    write!(gb.mmu.io, IOScrollY, 0x00)
+    write!(gb.mmu.io, IOScrollX, 0x00)
+    write!(gb.mmu.io, IOLCDYCompare, 0x00)
+    write!(gb.mmu.io, IOBackgroundPalette, 0xfc)
+    write!(gb.mmu.io, IOObjectPalette0, 0xff)
+    write!(gb.mmu.io, IOObjectPalette1, 0xff)
+    write!(gb.mmu.io, IOWindowY, 0x00)
+    write!(gb.mmu.io, IOWindowX, 0x00)
+    
     gb.cpu = Cpu(enableBootRom)
-    gb.mmu.interrupt_enable = 0x00
-    gb.mmu.bootRomEnabled = enableBootRom
     reset!(gb.dma)
     gb.buttons = 0
-    gb.video.newframe = false
-    gb.video.frameprogress = 0
     
     nothing
 end
 
-const bootrom = OffsetVector([
+const bootrom = Ram([
     0x31,0xFE,0xFF,0xAF,0x21,0xFF,0x9F,0x32,0xCB,0x7C,0x20,0xFB,0x21,0x26,0xFF,0x0E,
     0x11,0x3E,0x80,0x32,0xE2,0x0C,0x3E,0xF3,0xE2,0x32,0x3E,0x77,0x77,0x3E,0xFC,0xE0,
     0x47,0x11,0x04,0x01,0x21,0x10,0x80,0x1A,0xCD,0x95,0x00,0xCD,0x96,0x00,0x13,0x7B,
@@ -315,9 +363,9 @@ const bootrom = OffsetVector([
     0xDD,0xDC,0x99,0x9F,0xBB,0xB9,0x33,0x3E,0x3C,0x42,0xB9,0xA5,0xB9,0xA5,0x42,0x3C,
     0x21,0x04,0x01,0x11,0xA8,0x00,0x1A,0x13,0xBE,0x20,0xFE,0x23,0x7D,0xFE,0x34,0x20,
     0xF5,0x06,0x19,0x78,0x86,0x23,0x05,0x20,0xFB,0x86,0x20,0xFE,0x3E,0x01,0xE0,0x50
-   ], OffsetArrays.Origin(0))
+   ])
 
-function video_tileLineAddress(index::UInt8, y::UInt16, lowBank::Bool)
+function video_tileLineAddress(index::UInt8, y::UInt16, lowBank::Bool)::UInt16
     # Addresses relative to video ram base address
     addr = 0x0000
     if lowBank
@@ -330,13 +378,13 @@ function video_tileLineAddress(index::UInt8, y::UInt16, lowBank::Bool)
 end
 
 function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
-    spriteHeight = gb.mmu.io[IOLCDControl] & 0x04 > 0 ? 16 : 8
+    spriteHeight = read(gb.mmu.io, IOLCDControl) & 0x04 > 0 ? 16 : 8
     
     nsprites = 0
-    i = 0x00
+    i::UInt16 = 0x0000
     while i < 160
-        ypos = gb.mmu.oam[i]
-        xpos = gb.mmu.oam[i+1]
+        ypos = read(gb.mmu.oam, i)
+        xpos = read(gb.mmu.oam, i+0x01)
         if 0 < ypos < 160 && xpos < 168 # on screen
             if ypos <= scanline + 16 < ypos + spriteHeight # in scanline
                 # insert the sprite into the list, keeping the list in priority order
@@ -348,8 +396,8 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
                     inspos -= 1
                 end
                 if inspos < 10
-                    tile = gb.mmu.oam[i+0x02]
-                    attr = gb.mmu.oam[i+0x03]
+                    tile = read(gb.mmu.oam, i+0x02)
+                    attr = read(gb.mmu.oam, i+0x03)
                     if spriteHeight == 16
                         tile &= 0xfe
                     end
@@ -362,8 +410,8 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
                     tileaddr = video_tileLineAddress(tile, tiley, true)
                     
                     gb.video.scanline_sprites[inspos].x = xpos;
-                    gb.video.scanline_sprites[inspos].pixels[0] = gb.mmu.videoram[tileaddr]
-                    gb.video.scanline_sprites[inspos].pixels[1] = gb.mmu.videoram[tileaddr + 1]
+                    gb.video.scanline_sprites[inspos].pixels[0] = read(gb.video, tileaddr)
+                    gb.video.scanline_sprites[inspos].pixels[1] = read(gb.video, tileaddr + 0x01)
                     gb.video.scanline_sprites[inspos].attrs = attr
                     
                     if nsprites < 10
@@ -385,9 +433,9 @@ function video_linePixel(l1::UInt8, l2::UInt8, x::UInt16)::UInt8
 end
 
 function video_mapPixel(gb::Emulator, hiMap::Bool, loTiles::Bool, x::UInt16, y::UInt16)::UInt8
-    tileIndex = gb.mmu.videoram[(hiMap ? 0x1c00 : 0x1800) + ((y ÷ 8)*32) + (x ÷ 8)]
+    tileIndex = read(gb.video, UInt16((hiMap ? 0x1c00 : 0x1800) + ((y ÷ 8)*32) + (x ÷ 8)))
     addr = video_tileLineAddress(tileIndex, y%0x08, loTiles)
-    video_linePixel(gb.mmu.videoram[addr], gb.mmu.videoram[addr+1], x%0x0008)
+    video_linePixel(read(gb.video, addr), read(gb.video, addr+0x0001), x%0x0008)
 end
 
 function video_paletteLookup(pixel::UInt8, palette::UInt8)
@@ -395,7 +443,7 @@ function video_paletteLookup(pixel::UInt8, palette::UInt8)
 end
 
 function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
-    lcdc = gb.mmu.io[IOLCDControl]
+    lcdc = read(gb.mmu.io, IOLCDControl)
     hiMapBg = lcdc & 0x08 > 0 
     hiMapWin = lcdc & 0x40 > 0
     bgEnable = lcdc & 0x01 > 0
@@ -403,15 +451,15 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
     spriteEnable = lcdc & 0x02 > 0
     loTiles = lcdc & 0x10 > 0
     
-    wy = gb.mmu.io[IOWindowY]
-    wx = gb.mmu.io[IOWindowX]
+    wy = read(gb.mmu.io, IOWindowY)
+    wx = read(gb.mmu.io, IOWindowX)
     
     winEnable = winEnable && wx < 167 && wy < 144 && wy <= scanline
     spriteEnable = spriteEnable && gb.video.num_sprites > 0
 
     if winEnable || bgEnable || spriteEnable
-        scy = gb.mmu.io[IOScrollY]
-        scx = gb.mmu.io[IOScrollX]
+        scy = read(gb.mmu.io, IOScrollY)
+        scx = read(gb.mmu.io, IOScrollX)
         
         bgPixel = 0x00
         if winEnable && x + 0x07 >= wx
@@ -420,7 +468,7 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
             bgPixel = video_mapPixel(gb, hiMapBg, loTiles, (x+scx)%0x0100, (scanline+scy)%0x0100)
         end
 
-        finalColor = video_paletteLookup(bgPixel, gb.mmu.io[IOBackgroundPalette])
+        finalColor = video_paletteLookup(bgPixel, read(gb.mmu.io, IOBackgroundPalette))
 
         if spriteEnable
             # TODO: Implement this section (See C implementation in comment below)
@@ -455,21 +503,21 @@ end
 function video_update!(gb::Emulator, scanline::UInt8)::Nothing
     # assert scanline <= 154
     
-    lcdOn = gb.mmu.io[IOLCDControl] & 0x80 > 0x00
-    gb.mmu.io[IOLCDY] = scanline
+    lcdOn = read(gb.mmu.io, IOLCDControl) & 0x80 > 0x00
+    write!(gb.mmu.io, IOLCDY, scanline)
     
-    stat = gb.mmu.io[IOLCDStat]
+    stat = read(gb.mmu.io, IOLCDStat)
     
     if lcdOn
-        if scanline == gb.mmu.io[IOLCDYCompare]
+        if scanline == read(gb.mmu.io, IOLCDYCompare)
             if (stat & 0x04) == 0x00
-                gb.mmu.io[IOLCDStat] |= 0x04
+                write!(gb.mmu.io, IOLCDStat, read(gb.mmu.io, IOLCDStat) | 0x04)
                 if stat & 0x40 > 0x00
-                    gb.mmu.io[IOInterruptFlag] |= InterruptLCDC
+                    write!(gb.mmu.io, IOInterruptFlag, read(gb.mmu.io, IOInterruptFlag) | InterruptLCDC)
                 end
             end
         else
-            gb.mmu.io[IOLCDStat] &= ~0x04
+            write!(gb.mmu.io, IOLCDStat, read(gb.mmu.io, IOLCDStat) & ~0x04)
         end
     end
     
@@ -477,9 +525,9 @@ function video_update!(gb::Emulator, scanline::UInt8)::Nothing
     
     if scanline >= 144 # last 10 scanlines are vblank. don't draw anything
         if lcdMode != 1
-            gb.mmu.io[IOLCDStat] = (stat & ~0x03) | 0x01
-            gb.mmu.io[IOInterruptFlag] |= InterruptVBlank
-            if gb.mmu.io[IOLCDControl] & 0x80 == 0
+            write!(gb.mmu.io, IOLCDStat, (stat & ~0x03) | 0x01)
+            write!(gb.mmu.io, IOInterruptFlag, read(gb.mmu.io, IOInterruptFlag) | InterruptVBlank)
+            if read(gb.mmu.io, IOLCDControl) & 0x80 == 0
                 fill!(gb.video.buffer, 0x00)
             end
             gb.video.newframe = true
@@ -489,15 +537,15 @@ function video_update!(gb::Emulator, scanline::UInt8)::Nothing
         
         if scanlineProgress < 92
             if lcdMode != 2
-                gb.mmu.io[IOLCDStat] = (stat & 0x03) | 2
+                write!(gb.mmu.io, IOLCDStat, (stat & 0x03) | 0x02)
                 if stat & 0x20 > 0x00
-                    gb.mmu.io[IOInterruptFlag] |= InterruptLCDC
+                    write!(gb.mmu.io, IOInterruptFlag, read(gb.mmu.io, IOInterruptFlag) | InterruptLCDC)
                 end
                 video_readSprites!(gb, scanline)
                 gb.video.curx = 0
             end
         elseif scanlineProgress < 160 + 92
-            gb.mmu.io[IOLCDStat] = (stat & ~0x03) | 3
+            write!(gb.mmu.io, IOLCDStat, (stat & ~0x03) | 0x03)
             if lcdOn
                 while gb.video.curx < scanlineProgress - 92
                     video_drawPixel!(gb, scanline, gb.video.curx)
@@ -512,9 +560,9 @@ function video_update!(gb::Emulator, scanline::UInt8)::Nothing
                         gb.video.curx += 1
                     end
                 end
-                gb.mmu.io[IOLCDStat] = (stat & ~0x03)
+                write!(gb.mmu.io, IOLCDStat, (stat & ~0x03))
                 if stat & 0x08 > 0x00
-                    gb.mmu.io[IOInterruptFlag] |= InterruptLCDC
+                    write!(gb.mmu.io, IOInterruptFlag, read(gb.mmu.io, IOInterruptFlag) | InterruptLCDC)
                 end
             end
         end
@@ -544,34 +592,34 @@ function clock_getTimerBit(control::UInt8, cycles::UInt16)::Bool
 end
 
 function clock_timerIncrement!(clock::Clock, mmu::Mmu)::Nothing
-    timer = mmu.io[IOTimerCounter]
+    timer = read(mmu.io, IOTimerCounter)
     if timer == 0xff
         clock.overflow = true
     end
-    mmu.io[IOTimerCounter] = timer + 0x01
+    write!(mmu.io, IOTimerCounter, timer + 0x01)
     nothing
 end
 
 function clock_countChange!(clock::Clock, mmu::Mmu, newval::UInt16)
-    tac = mmu.io[IOTimerControl]
+    tac = read(mmu.io, IOTimerControl)
     if tac & 0x04 > 0x00
         if !clock_getTimerBit(tac, newval) && clock_getTimerBit(tac, clock.cycles)
             clock_timerIncrement!(clock, mmu)
         end
     end
     clock.cycles = newval
-    mmu.io[IODivider] = newval >> 0x08
+    write!(mmu.io, IODivider, UInt8(newval >> 0x08))
 end
 
 function clock_increment(gb::Emulator)::Nothing
     gb.clock.loading = false
     if gb.clock.overflow
         # Delayed overflow effects
-        gb.mmu.io[IOInterruptFlag] |= InterruptTIMA
+        write!(gb.mmu.io, IOInterruptFlag, read(gb.mmu.io, IOInterruptFlag) | InterruptTIMA)
         gb.clock.overflow = false
 
         # modulo is being loaded in next machine cycle
-        gb.mmu.io[IOTimerCounter] = gb.mmu.io[IOTimerModulo]
+        write!(gb.mmu.io, IOTimerCounter, read(gb.mmu.io, IOTimerModulo))
         gb.clock.loading = true
     end
     
@@ -586,8 +634,8 @@ function clock_increment(gb::Emulator)::Nothing
 end
 
 function clock_updateTimerControl!(clock::Clock, mmu::Mmu, val::UInt8)::Nothing
-    old = mmu.io[IOTimerControl]
-    mmu.io[IOTimerControl] = val
+    old = read(mmu.io, IOTimerControl)
+    write!(mmu.io, IOTimerControl, val)
     
     oldbit = (old & 0x04) > 0x00 && clock_getTimerBit(old, clock.cycles)
     newbit = (val & 0x04) > 0x00 && clock_getTimerBit(val, clock.cycles)
@@ -601,25 +649,25 @@ end
 
 function mmu_readDirect(mmu::Mmu, addr::UInt16)::UInt8
     if 0x0000 <= addr < 0x0100 && mmu.bootRomEnabled
-        bootrom[addr]
+        read(bootrom, addr)
     elseif 0x0000 <= addr < 0x8000
         Carts.read(mmu.cart, addr)
     elseif 0x8000 <= addr < 0xa000
-        mmu.videoram[addr - 0x8000]
+        read(mmu.video, addr - 0x8000)
     elseif 0xa000 <= addr < 0xc000
         Carts.read(mmu.cart, addr)
     elseif 0xc000 <= addr < 0xe000
-        mmu.workram[addr - 0xc000]
+        read(mmu.workram, addr - 0xc000)
     elseif 0xe000 <= addr < 0xfe00
-        mmu.workram[addr - 0xe000]
+        read(mmu.workram, addr - 0xc000)
     elseif 0xfe00 <= addr < 0xfe9f
-        mmu.oam[addr - 0xfe00]
+        read(mmu.oam, addr - 0xfe00)
     elseif 0xfe9f <= addr < 0xff00
         0x00
     elseif 0xff00 <= addr < 0xff80
-        mmu.io[addr - 0xff00]
+        read(mmu.io, addr - 0xff00)
     elseif 0xff80 <= addr < 0xffff
-        mmu.highram[addr - 0xff80]
+        read(mmu.highram, addr - 0xff80)
     elseif 0xffff == addr
         mmu.interrupt_enable
     end
@@ -640,41 +688,41 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     #elseif 0x0000 <= addr < 0x2000
     # TODO: Cart RAM Bank Enabled
     elseif 0x2000 <= addr < 0x6000
-        write!(mmu.cart, addr, val)
+        Carts.write!(mmu.cart, addr, val)
     elseif 0x6000 <= addr < 0x8000
         # RTC. Not implemented.
     elseif 0x8000 <= addr < 0xa000
         # TODO: Writes to VRAM should be ignored when the LCD is being redrawn
-        mmu.videoram[addr - 0x8000] = val
+        write!(mmu.video, addr - 0x8000, val)
     elseif 0xc000 <= addr < 0xe000
-        mmu.workram[addr - 0xc000] = val
+        write!(mmu.workram, addr - 0xc000, val)
     elseif 0xe000 <= addr < 0xfe00
-        mmu.workram[addr - 0xe000] = val
+        write!(mmu.workram, addr - 0xe000, val)
     elseif 0xfe00 <= addr < 0xfe9f
-        mmu.oam[addr - 0xfe00] = val
+        write!(mmu.oam, addr - 0xfe00, val)
     elseif 0xfe9f <= addr < 0xff00
         nothing
     elseif 0xff00 + IODivider == addr
         clock_countChange!(mmu.clock[], mmu, 0x0000)
     elseif 0xff00 + IOTimerCounter == addr
         if mmu.clock[].loading
-            mmu.io[IOTimerCounter] = val
+            write!(mmu.io, IOTimerCounter, val)
             mmu.clock[].overflow = false
         end
     elseif 0xff00 + IOTimerModulo == addr
-        mmu.io[IOTimerModulo] = val
+        write!(mmu.io, IOTimerModulo, val)
         if mmu.clock[].loading
             # While loading writes are immediate
-            mmu.io[IOTimerCounter] = val
+            write!(mmu.io, IOTimerCounter, val)
         end
     elseif 0xff00 + IOTimerControl == addr
         clock_updateTimerControl!(mmu.clock[], mmu, val)
     elseif 0xff00 + IOInterruptFlag == addr
-        mmu.io[IOInterruptFlag] = val | 0xe0
+        write!(mmu.io, IOInterruptFlag, val | 0xe0)
     elseif 0xff00 + IOLCDStat == addr
-        mmu.io[IOLCDStat] = (mmu.io[IOLCDStat] & 0x03) | (val & ~0x03)
+        write!(mmu.io, IOLCDStat, (read(mmu.io, IOLCDStat) & 0x03) | (val & ~0x03))
     elseif 0xff00 + IOLCDY == addr
-        mmu.io[IOLCDY] = 0x00
+        write!(mmu.io, IOLCDY, 0x00)
     elseif 0xff00 + IOOAMDMA == addr
         if val <= 0xf1
             mmu.dma[].pendingsource = val
@@ -683,9 +731,9 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     elseif 0xff00 + IOBootRomDisable == addr
         mmu.bootRomEnabled = false
     elseif 0xff00 <= addr < 0xff80 # Generic IO for unimplemented devices.
-        mmu.io[addr - 0xff00] = val
+        write!(mmu.io, addr - 0xff00, val)
     elseif 0xff80 <= addr < 0xffff
-        mmu.highram[addr - 0xff80] = val
+        write!(mmu.highram, addr - 0xff80, val)
     elseif 0xffff == addr
         mmu.interrupt_enable = val
     end
@@ -2045,7 +2093,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
 end
 
 function handleInterrupts(gb::Emulator, cpu::Cpu)
-    iflag = gb.mmu.io[IOInterruptFlag]
+    iflag = read(gb.mmu.io, IOInterruptFlag)
     mask = 0x1f
     irqs = gb.mmu.interrupt_enable & iflag & mask
     if irqs > 0
@@ -2063,7 +2111,7 @@ function handleInterrupts(gb::Emulator, cpu::Cpu)
                     break
                 end
             end
-            gb.mmu.io[IOInterruptFlag] = iflag
+            write!(gb.mmu.io, IOInterruptFlag, iflag)
         end
     end
 end
@@ -2074,13 +2122,13 @@ const palette = [0xFFC4CFA1, 0xFF8B956D, 0xFF4D543C, 0xFF1F1F1F] # Pocket
 
 function input_update!(mmu::Mmu, buttons::UInt8)::Nothing
     invButtons = ~buttons
-    joyReg = mmu.io[IOJoypad]
+    joyReg = read(mmu.io, IOJoypad)
     if joyReg & 0x20 != 0 # Directional keys
-        mmu.io[IOJoypad] = (joyReg & 0xf0) | ((invButtons >> 4) & 0x0f)
+        write!(mmu.io, IOJoypad, (joyReg & 0xf0) | ((invButtons >> 4) & 0x0f))
     elseif joyReg & 0x10 == 0 # Buttons
-        mmu.io[IOJoypad] = (joyReg & 0xf0) | invButtons & 0x0f
+        write!(mmu.io, IOJoypad, (joyReg & 0xf0) | invButtons & 0x0f)
     elseif joyReg == 3 # Model check - 0xfx == classic gameboy
-        mmu.io[IOJoypad] = 0xff
+        write!(mmu.io, IOJoypad, 0xff)
     end
 
     nothing
@@ -2118,7 +2166,7 @@ function buttonstate!(gb::Emulator, b::Button, pressed::Bool)
     else
         if gb.buttons & button == 0
             gb.buttons |= button
-            gb.mmu.io[IOInterruptFlag] |= InterruptJoypad
+            write!(gb.mmu.io, IOInterruptFlag, read(gb.mmu.io, IOInterruptFlag) | InterruptJoypad)
         end
     end
     
