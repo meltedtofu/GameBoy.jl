@@ -2,6 +2,8 @@ module Carts
 
 using OffsetArrays
 
+using ..Component
+
 abstract type MemoryBankController end
 
 function idx(mbc::MemoryBankController, addr::UInt16)::Tuple{Int, Int}
@@ -18,7 +20,7 @@ end
 struct NoMBC <: MemoryBankController end
 
 idx(mbc::NoMBC, addr::UInt16) = (addr, 0)
-write!(mbc::NoMBC, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing = nothing
+Component.write!(mbc::NoMBC, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing = nothing
 
 mutable struct MBC1 <: MemoryBankController
     active_rom_bank::UInt8
@@ -27,7 +29,7 @@ mutable struct MBC1 <: MemoryBankController
     MBC1() = new(0x01, 0x00)
 end
 
-function write!(mbc::MBC1, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
+function Component.write!(mbc::MBC1, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
     if 0x2000 <= addr < 0x4000
         bankno = data & 0x1f
         if bankno == 0
@@ -52,7 +54,7 @@ end
 # TODO: These chips include 512 half bytes of RAM built into the MBC2 itself
 idx(mbc::MBC2, addr::UInt16) = addr
 
-function write!(mbc::MBC2, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
+function Component.write!(mbc::MBC2, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
     if 0x2000 <= addr < 0x4000
         bankno = data & 0x0f
         if bankno == 0
@@ -70,7 +72,7 @@ mutable struct MBC3 <: MemoryBankController
     MBC3() = new(0x01)
 end
 
-function write!(mbc::MBC3, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
+function Component.write!(mbc::MBC3, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
     if 0x2000 <= addr < 0x4000
         bankno = data & 0x7f
         if bankno == 0
@@ -93,7 +95,7 @@ mutable struct MBC5 <: MemoryBankController
     MBC5() = new(0x01)
 end
 
-function write!(mbc::MBC5, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
+function Component.write!(mbc::MBC5, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
     if 0x2000 <= addr < 0x3000
         mbc.active_rom_bank = (mbc.active_rom_bank & ~0xff) | data
     elseif 0x3000 <= addr < 0x4000
@@ -228,7 +230,7 @@ mutable struct Cartridge
     end
 end
 
-function read(c::Cartridge, addr::UInt16)::UInt8
+function Component.readb(c::Cartridge, addr::UInt16)::UInt8
     (romidx, ramidx) = idx(c.mbc, addr)
     if romidx >= 0
         c.rom[romidx]
@@ -239,11 +241,11 @@ function read(c::Cartridge, addr::UInt16)::UInt8
     end
 end
 
-read(cr::Ref{Cartridge}, addr::UInt16)::UInt8 = read(cr[], addr)
+Component.readb(cr::Ref{Cartridge}, addr::UInt16)::UInt8 = readb(cr[], addr)
 
-write!(c::Cartridge, addr::UInt16, data::UInt8)::Nothing = write!(c.mbc, addr, data, Ref(c.ram))
-write!(cr::Ref{Cartridge}, addr::UInt16, data::UInt8)::Nothing = write!(cr[], addr, data)
+Component.write!(c::Cartridge, addr::UInt16, data::UInt8)::Nothing = write!(c.mbc, addr, data, Ref(c.ram))
+Component.write!(cr::Ref{Cartridge}, addr::UInt16, data::UInt8)::Nothing = write!(cr[], addr, data)
 
-export Cartridge, read, write!
+export Cartridge
 
 end # module Carts

@@ -1,26 +1,14 @@
 module GameBoy
 
 using OffsetArrays
+include("Component.jl")
+using .Component
 
 include("Processor.jl")
 using .Processor
 
 include("Carts.jl")
 using .Carts
-
-macro exportinstances(enum)
-    eval = GlobalRef(Core, :eval)
-    return :($eval($__module__, Expr(:export, map(Symbol, instances($enum))...)))
-end
-
-@enum Interrupt begin
-    InterruptVBlank=0x01
-    InterruptLCDC=0x02
-    InterruptTIMA=0x04
-    InterruptSerial=0x08
-    InterruptJoypat=0x10
-    InterruptMask=0x1f
-end
 
 """
 Addresses of IO devices relative to 0xff00
@@ -51,29 +39,27 @@ Intentionally skipping sound since it is unimplemented in this emulator
     IOBootRomDisable=0x50
 end
 
-"""
-Random Access Memory.
-"""
-mutable struct Ram
-    bytes::OffsetVector{UInt8, Vector{UInt8}}
-    
-    Ram(size::UInt16) = Ram(zeros(UInt8, size))
-    Ram(data::Vector{UInt8}) = new(OffsetVector(data, OffsetArrays.Origin(0)))
+include("DirectMemoryAccess.jl")
+using .DirectMemoryAccess
+
+include("RandomAccessMemory.jl")
+using .RandomAccessMemory
+
+read(ram::Ram, addr::IORegisters)::UInt8 = readb(ram, UInt16(addr))
+Component.write!(ram::Ram, addr::IORegisters, v::UInt8)::Nothing = RandomAccessMemory.write!(ram, UInt16(addr), v)
+
+macro exportinstances(enum)
+    eval = GlobalRef(Core, :eval)
+    return :($eval($__module__, Expr(:export, map(Symbol, instances($enum))...)))
 end
 
-function reset!(ram::Ram)::Nothing
-    fill!(ram.bytes, 0x00)
-    nothing
-end
-
-read(ram::Ref{Ram}, addr::UInt16)::UInt8 = read(ram[])
-read(ram::Ram, addr::IORegisters)::UInt8 = read(ram, UInt16(addr))
-read(ram::Ram, addr::UInt16)::UInt8 = ram.bytes[addr]
-write!(ram::Ram, addr::IORegisters, v::UInt8)::Nothing = write!(ram, UInt16(addr), v)
-write!(ram::Ref{Ram}, addr::UInt16, v::UInt8)::Nothing = write!(ram[], addr, v)
-function write!(ram::Ram, addr::UInt16, v::UInt8)::Nothing
-    ram.bytes[addr] = v
-    nothing
+@enum Interrupt begin
+    InterruptVBlank=0x01
+    InterruptLCDC=0x02
+    InterruptTIMA=0x04
+    InterruptSerial=0x08
+    InterruptJoypat=0x10
+    InterruptMask=0x1f
 end
 
 mutable struct Sprite
@@ -116,16 +102,16 @@ mutable struct Video
 end
 
 function reset!(v::Video)::Nothing
-    reset!(v.ram)
+    Component.reset!(v.ram)
     v.newframe = false
     v.frameprogress = 0
     nothing
 end
 
 read(v::Ref{Video}, addr::UInt16)::UInt8 = read(v[], addr)
-read(v::Video, addr::UInt16)::UInt8 = read(v.ram, addr)
-write!(v::Ref{Video}, addr::UInt16, val::UInt8):: Nothing = write!(v[], addr, val)
-write!(v::Video, addr::UInt16, val::UInt8)::Nothing = write!(v.ram, addr, val)
+read(v::Video, addr::UInt16)::UInt8 = readb(v.ram, addr)
+Component.write!(v::Ref{Video}, addr::UInt16, val::UInt8):: Nothing = write!(v[], addr, val)
+Component.write!(v::Video, addr::UInt16, val::UInt8)::Nothing = RandomAccessMemory.write!(v.ram, addr, val)
 
 """
 Main System Clock
@@ -144,28 +130,6 @@ function reset!(c::Clock)
     c.overflow = false
     c.loading = false
 end
-
-"""
-Direct Memory Access metadata
-"""
-mutable struct DMA
-    delaystart::Bool
-    pendingsource::UInt8
-    source::UInt16 # source for currently running dma. 0 if not active
-    active::Bool # Is OAM DMA active on current cycle?
-    
-    DMA() = new(false, 0, 0, false)
-end
-
-function reset!(dma::DMA)::Nothing
-    dma.delaystart = false
-    dma.pendingsource = 0
-    dma.source = 0
-    active = false
-    nothing
-end
-
-
 
 """
 Memory Mapping Unit
@@ -197,8 +161,8 @@ mutable struct Mmu
 end
 
 function reset!(mmu::Mmu, enableBootRom::Bool)::Nothing
-    reset!(mmu.workram)
-    reset!(mmu.highram)
+    Component.reset!(mmu.workram)
+    Component.reset!(mmu.highram)
     mmu.interrupt_enable = 0x00
     mmu.bootRomEnabled = enableBootRom
     nothing
@@ -340,7 +304,7 @@ function reset!(gb::Emulator)
     write!(gb.mmu.io, IOWindowX, 0x00)
     
     gb.cpu = Cpu(enableBootRom)
-    reset!(gb.dma)
+    Component.reset!(gb.dma)
     gb.buttons = 0
     
     nothing
@@ -383,8 +347,8 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
     nsprites = 0
     i::UInt16 = 0x0000
     while i < 160
-        ypos = read(gb.mmu.oam, i)
-        xpos = read(gb.mmu.oam, i+0x01)
+        ypos = readb(gb.mmu.oam, i)
+        xpos = readb(gb.mmu.oam, i+0x01)
         if 0 < ypos < 160 && xpos < 168 # on screen
             if ypos <= scanline + 16 < ypos + spriteHeight # in scanline
                 # insert the sprite into the list, keeping the list in priority order
@@ -396,8 +360,8 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
                     inspos -= 1
                 end
                 if inspos < 10
-                    tile = read(gb.mmu.oam, i+0x02)
-                    attr = read(gb.mmu.oam, i+0x03)
+                    tile = readb(gb.mmu.oam, i+0x02)
+                    attr = readb(gb.mmu.oam, i+0x03)
                     if spriteHeight == 16
                         tile &= 0xfe
                     end
@@ -649,25 +613,25 @@ end
 
 function mmu_readDirect(mmu::Mmu, addr::UInt16)::UInt8
     if 0x0000 <= addr < 0x0100 && mmu.bootRomEnabled
-        read(bootrom, addr)
+        readb(bootrom, addr)
     elseif 0x0000 <= addr < 0x8000
-        Carts.read(mmu.cart, addr)
+        readb(mmu.cart, addr)
     elseif 0x8000 <= addr < 0xa000
-        read(mmu.video, addr - 0x8000)
+        readb(mmu.video, addr - 0x8000)
     elseif 0xa000 <= addr < 0xc000
-        Carts.read(mmu.cart, addr)
+        readb(mmu.cart, addr)
     elseif 0xc000 <= addr < 0xe000
-        read(mmu.workram, addr - 0xc000)
+        readb(mmu.workram, addr - 0xc000)
     elseif 0xe000 <= addr < 0xfe00
-        read(mmu.workram, addr - 0xc000)
+        readb(mmu.workram, addr - 0xc000)
     elseif 0xfe00 <= addr < 0xfe9f
-        read(mmu.oam, addr - 0xfe00)
+        readb(mmu.oam, addr - 0xfe00)
     elseif 0xfe9f <= addr < 0xff00
         0x00
     elseif 0xff00 <= addr < 0xff80
-        read(mmu.io, addr - 0xff00)
+        readb(mmu.io, addr - 0xff00)
     elseif 0xff80 <= addr < 0xffff
-        read(mmu.highram, addr - 0xff80)
+        readb(mmu.highram, addr - 0xff80)
     elseif 0xffff == addr
         mmu.interrupt_enable
     end
