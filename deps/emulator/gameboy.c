@@ -636,79 +636,79 @@ static void video_drawPixel(struct Gameboy* gb, unsigned int scanlineNum, unsign
 //         input_setUp(&(gb->buttons), button);
 //     }
 // }
-char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
-{
-    /* Reset state */
-    gb->mem.rtc.BaseTime = time(NULL);
-    for(unsigned i = 0; i < 5; i += 1) {
-        gb->mem.rtc.BaseReg[i] = 0x00;
-    }
-
-    gb->mem.MBCModel = Cart_MBC1_16_8;
-    gb->mem.CartRAMSize = 0;
-
-    return NULL;
-}
-int gameboy_reset(struct Gameboy* gb)
-{
-    gb->clock.CycleCount = 0;
-    gb->clock.TimerOverflow = false;
-    gb->clock.TimerLoading = false;
-    /* Clear all VRAM - the bootrom does this. */
-    memset(gb->mem.VideoRAM, 0, sizeof(gb->mem.VideoRAM));
-    /* Initialise required IO registers */
-    gb->mem.IO[IO_Joypad] = 0xCF;
-    gb->mem.IO[IO_SerialControl] = 0x7E;
-    gb->mem.IO[IO_TimerCounter] = 0x00;
-    gb->mem.IO[IO_TimerModulo] = 0x00;
-    gb->mem.IO[IO_TimerControl] = 0x00;
-    gb->mem.IO[IO_LCDControl] = 0x91;
-    gb->mem.IO[IO_ScrollY] = 0x00;
-    gb->mem.IO[IO_ScrollX] = 0x00;
-    gb->mem.IO[IO_LCDYCompare] = 0x00;
-    gb->mem.IO[IO_BackgroundPalette] = 0xFC;
-    gb->mem.IO[IO_ObjectPalette0] = 0xFF;
-    gb->mem.IO[IO_ObjectPalette1] = 0xFF;
-    gb->mem.IO[IO_WindowX] = 0x00;
-    gb->mem.IO[IO_WindowY] = 0x00;
-
-    /* Initialise sound IO registers */
-    //gb->mem.IO[0xFF10] = 0x80;
-    //gb->mem.IO[0xFF11] = 0xBF;
-    //gb->mem.IO[0xFF12] = 0xF3;
-    //gb->mem.IO[0xFF14] = 0xBF;
-    //gb->mem.IO[0xFF16] = 0x3F;
-    //gb->mem.IO[0xFF17] = 0x00;
-    //gb->mem.IO[0xFF19] = 0xBF;
-    //gb->mem.IO[0xFF1A] = 0x7F;
-    //gb->mem.IO[0xFF1B] = 0xFF;
-    //gb->mem.IO[0xFF1C] = 0x9F;
-    //gb->mem.IO[0xFF1E] = 0xBF;
-    //gb->mem.IO[0xFF20] = 0xFF;
-    //gb->mem.IO[0xFF21] = 0x00;
-    //gb->mem.IO[0xFF22] = 0x00;
-    //gb->mem.IO[0xFF23] = 0xBF;
-    //gb->mem.IO[0xFF24] = 0x77;
-    //gb->mem.IO[0xFF25] = 0xF3;
-    //gb->mem.IO[0xFF26] = 0xF1;
-    gb->mem.MBCRAMBank = 0;
-    gb->mem.CartRAMBankEnabled = false;
-
-    /* MBC1 always starts up in 16/8 mode */
-    if(gb->mem.MBCModel == Cart_MBC1_4_32) {
-        gb->mem.MBCModel = Cart_MBC1_16_8;
-    }
-
-    gb->buttons.Pressed = 0;
-
-    gb->lcd.NewFrame = false;
-//     gb->dma.PendingSource = 0;
-//     gb->dma.DelayStart = false;
-//     gb->dma.Source = 0;
-//     gb->dma.Active = false;
-    gb->lcd.FrameProgress = 0;
-    return 0;
-}
+// char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
+// {
+//     /* Reset state */
+//     gb->mem.rtc.BaseTime = time(NULL);
+//     for(unsigned i = 0; i < 5; i += 1) {
+//         gb->mem.rtc.BaseReg[i] = 0x00;
+//     }
+// 
+//     gb->mem.MBCModel = Cart_MBC1_16_8;
+//     gb->mem.CartRAMSize = 0;
+// 
+//     return NULL;
+// }
+// int gameboy_reset(struct Gameboy* gb)
+// {
+//     gb->clock.CycleCount = 0;
+//     gb->clock.TimerOverflow = false;
+//     gb->clock.TimerLoading = false;
+//     /* Clear all VRAM - the bootrom does this. */
+//     memset(gb->mem.VideoRAM, 0, sizeof(gb->mem.VideoRAM));
+//     /* Initialise required IO registers */
+//     gb->mem.IO[IO_Joypad] = 0xCF;
+//     gb->mem.IO[IO_SerialControl] = 0x7E;
+//     gb->mem.IO[IO_TimerCounter] = 0x00;
+//     gb->mem.IO[IO_TimerModulo] = 0x00;
+//     gb->mem.IO[IO_TimerControl] = 0x00;
+//     gb->mem.IO[IO_LCDControl] = 0x91;
+//     gb->mem.IO[IO_ScrollY] = 0x00;
+//     gb->mem.IO[IO_ScrollX] = 0x00;
+//     gb->mem.IO[IO_LCDYCompare] = 0x00;
+//     gb->mem.IO[IO_BackgroundPalette] = 0xFC;
+//     gb->mem.IO[IO_ObjectPalette0] = 0xFF;
+//     gb->mem.IO[IO_ObjectPalette1] = 0xFF;
+//     gb->mem.IO[IO_WindowX] = 0x00;
+//     gb->mem.IO[IO_WindowY] = 0x00;
+// 
+//     /* Initialise sound IO registers */
+//     //gb->mem.IO[0xFF10] = 0x80;
+//     //gb->mem.IO[0xFF11] = 0xBF;
+//     //gb->mem.IO[0xFF12] = 0xF3;
+//     //gb->mem.IO[0xFF14] = 0xBF;
+//     //gb->mem.IO[0xFF16] = 0x3F;
+//     //gb->mem.IO[0xFF17] = 0x00;
+//     //gb->mem.IO[0xFF19] = 0xBF;
+//     //gb->mem.IO[0xFF1A] = 0x7F;
+//     //gb->mem.IO[0xFF1B] = 0xFF;
+//     //gb->mem.IO[0xFF1C] = 0x9F;
+//     //gb->mem.IO[0xFF1E] = 0xBF;
+//     //gb->mem.IO[0xFF20] = 0xFF;
+//     //gb->mem.IO[0xFF21] = 0x00;
+//     //gb->mem.IO[0xFF22] = 0x00;
+//     //gb->mem.IO[0xFF23] = 0xBF;
+//     //gb->mem.IO[0xFF24] = 0x77;
+//     //gb->mem.IO[0xFF25] = 0xF3;
+//     //gb->mem.IO[0xFF26] = 0xF1;
+//     gb->mem.MBCRAMBank = 0;
+//     gb->mem.CartRAMBankEnabled = false;
+// 
+//     /* MBC1 always starts up in 16/8 mode */
+//     if(gb->mem.MBCModel == Cart_MBC1_4_32) {
+//         gb->mem.MBCModel = Cart_MBC1_16_8;
+//     }
+// 
+//     gb->buttons.Pressed = 0;
+// 
+//     gb->lcd.NewFrame = false;
+// //     gb->dma.PendingSource = 0;
+// //     gb->dma.DelayStart = false;
+// //     gb->dma.Source = 0;
+// //     gb->dma.Active = false;
+//     gb->lcd.FrameProgress = 0;
+//     return 0;
+// }
 
 void gameboy_free(struct Gameboy* gb) {
   free(gb);

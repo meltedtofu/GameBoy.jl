@@ -8,14 +8,6 @@ using .Processor
 include("Carts.jl")
 using .Carts
 
-const gblib = abspath(joinpath(@__DIR__,
-                               "..",
-                               "deps",
-                               "emulator",
-                               Sys.iswindows() ? "gameboy.dll"
-                                               : (Sys.isapple() ? "libgameboy.dylib"
-                                                                : "libgameboy.so")))
-
 macro exportinstances(enum)
     eval = GlobalRef(Core, :eval)
     return :($eval($__module__, Expr(:export, map(Symbol, instances($enum))...)))
@@ -156,7 +148,6 @@ end
 The state of an emulator.
 """
 mutable struct Emulator
-    g::Ptr{Cvoid}
     cpu::Cpu
     mmu::Mmu
     dma::DMA
@@ -167,8 +158,7 @@ mutable struct Emulator
 
     function Emulator(cartpath)
         clock = Clock()
-        new(ccall((:gameboy_alloc, gblib), Ptr{Cvoid}, ()),
-            Cpu(),
+        new(Cpu(),
             Mmu(Cartridge(cartpath; skipChecksum=true), clock),
             DMA(),
             clock,
@@ -252,43 +242,21 @@ end
 
 export execute
 
-
-"""
-Release the memory backing the Emulator.
-"""
-function free!(gb::Emulator)
-    ccall((:gameboy_free, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
-end
-
-"""
-Open a file on disk as a ROM.
-"""
-function loadrom!(gb::Emulator, path::String; skip_checksum::Bool=false)
-    result = ccall((:gameboy_load, gblib), Cstring, (Ptr{Cvoid},Cint), gb.g, skip_checksum)
-    if result != C_NULL
-        free!(gb)
-        error(unsafe_string(result))
-    end
-    nothing
-end
-
 """
 Grab a copy of the cartridge RAM.
 This captures the save state.
 Use `ram!` to restore this state.
 """
 function ram(gb::Emulator)::Vector{UInt8}
-    len = ccall((:gameboy_cart_ram_size, gblib), UInt, (Ptr{Cvoid},), gb.g)
-    cbytes = ccall((:gameboy_cart_ram, gblib), Ptr{UInt8}, (Ptr{Cvoid},), gb.g)
-    deepcopy(unsafe_wrap(Vector{UInt8}, cbytes, (len)))
+    deepcopy(gb.cart.ram)
 end
 
 """
 Restore cartridge RAM.
 Use `ram` to capture the state.
 """
-function ram!(gb::Emulator, data::Vector{UInt8})
-    ccall((:gameboy_load_ram, gblib), Cvoid, (Ptr{Cvoid}, UInt, Ptr{UInt8}), gb.g, length(data), data)
+function ram!(gb::Emulator, data::Vector{UInt8})::Nothing
+    gb.cart.ram = deepcopy(data)
     nothing
 end
 
@@ -296,12 +264,34 @@ end
 Power cycle the emulator
 """
 function reset!(gb::Emulator)
+    # TODO: move reset to per component with multiple dispatch
     enableBootRom = true
-    ccall((:gameboy_reset, gblib), Cvoid, (Ptr{Cvoid},), gb.g)
+    gb.clock.cycles = 0
+    gb.clock.overflow = false
+    gb.clock.loading = false
+    fill!(gb.mmu.videoram, 0x00)
+    gb.mmu.io[IOJoypad] = 0xcf
+    gb.mmu.io[IOSerialControl] = 0x7e
+    gb.mmu.io[IOTimerCounter] = 0x00
+    gb.mmu.io[IOTimerModulo] = 0x00
+    gb.mmu.io[IOTimerControl] = 0x00
+    gb.mmu.io[IOLCDControl] = 0x91
+    gb.mmu.io[IOScrollY] = 0x00
+    gb.mmu.io[IOScrollX] = 0x00
+    gb.mmu.io[IOLCDYCompare] = 0x00
+    gb.mmu.io[IOBackgroundPalette] = 0xfc
+    gb.mmu.io[IOObjectPalette0] = 0xff
+    gb.mmu.io[IOObjectPalette1] = 0xff
+    gb.mmu.io[IOWindowY] = 0x00
+    gb.mmu.io[IOWindowX] - 0x00
     gb.cpu = Cpu(enableBootRom)
     gb.mmu.interrupt_enable = 0x00
     gb.mmu.bootRomEnabled = enableBootRom
     reset!(gb.dma)
+    gb.buttons = 0
+    gb.video.newframe = false
+    gb.video.frameprogress = 0
+    
     nothing
 end
 
@@ -430,7 +420,27 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
         finalColor = video_paletteLookup(bgPixel, gb.mmu.io[IOBackgroundPalette])
 
         if spriteEnable
-            # TODO: Implement this section
+            # TODO: Implement this section (See C implementation in comment below)
+#            uint8_t obp[2] = { gb->mem.IO[IO_ObjectPalette0], gb->mem.IO[IO_ObjectPalette1] };
+#            struct GameboySprite const* sprites = gb->lcd.ScanlineSprites;
+#
+#            for(unsigned int n = 0; n < gb->lcd.NumSprites; n += 1) {
+#                if(x + 8 >= sprites[n].x && x + 8 < sprites[n].x + 8) {
+#                    unsigned int tileX = x + 8 - sprites[n].x;
+#                    bool const mirrored = (sprites[n].attrs & 0x20);
+#                    uint8_t pixel = video_linePixel(sprites[n].pixels, mirrored? (7 - tileX) : tileX);
+#
+#                    if(pixel) {
+#                        bool hasPriority = (sprites[n].attrs & 0x80) == 0;
+#                        if(finalColour == 0 || hasPriority) {
+#                            uint8_t palette = obp[(sprites[n].attrs & 0x10)? 1 : 0];
+#                            finalColour = video_paletteLookup(pixel, palette);
+#                        }
+#                        /* Only draw first non-zero sprite pixel */
+#                        break;
+#                    }
+#                }
+#            }
         end
 
         gb.video.buffer[x+0x01, scanline+0x01] = finalColor
@@ -1153,8 +1163,6 @@ function cb_step(gb::Emulator, cpu::Cpu)::Nothing
 end
 
 function cpu_step(gb::Emulator, cpu::Cpu)
-    # NOTE: the mo for this port is top down. move it over section by section and then ccall the library with the rest of the lines.
-
     if cpu.Halted
         clock_increment(gb)
         return
@@ -2122,7 +2130,5 @@ function read(gb::Emulator, addr::UInt16)::UInt8
 end
 
 export Emulator, free!, loadrom!, reset!, doframe!, buttonstate!, read, ram, ram!
-
-export gblib
 
 end # module GameBoy
