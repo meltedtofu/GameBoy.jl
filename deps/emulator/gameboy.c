@@ -602,40 +602,40 @@ static void video_drawPixel(struct Gameboy* gb, unsigned int scanlineNum, unsign
 // 
 //     gb->lcd.FrameProgress = (gb->lcd.FrameProgress + 1) % 70224;
 // }
-void input_setUp(struct Buttons* buttons, int button)
-{
-    buttons->Pressed &= ~button;
-}
-void input_setDown(struct Buttons* buttons, struct Memory* mem, int button)
-{
-    if((buttons->Pressed & button) == 0) {
-        buttons->Pressed |= button;
-        mem->IO[IO_InterruptFlag] |= Interrupt_Joypad;
-    }
-}
-void input_update(struct Memory* mem, struct Buttons* buttons)
-{
-    uint8_t invButtons = ~buttons->Pressed;
-    uint8_t joyReg = mem->IO[IO_Joypad];
-    if((joyReg & 0x20) != 0) { /* Directional keys */
-        mem->IO[IO_Joypad] = ((joyReg & 0xF0) | ((invButtons >> 4u) & 0x0F));
-    }
-    else if((joyReg & 0x10) != 0) { /* Buttons */
-        mem->IO[IO_Joypad] = ((joyReg & 0xF0) | (invButtons & 0x0F));
-    }
-    else if(joyReg == 3) { /* Model check - 0xFX == classic gameboy */
-        mem->IO[IO_Joypad] = 0xFF;
-    }
-}
-void gameboy_setButtonState(struct Gameboy* gb, int button, bool down)
-{
-    if(down) {
-        input_setDown(&(gb->buttons), &(gb->mem), button);
-    }
-    else {
-        input_setUp(&(gb->buttons), button);
-    }
-}
+// void input_setUp(struct Buttons* buttons, int button)
+// {
+//     buttons->Pressed &= ~button;
+// }
+// void input_setDown(struct Buttons* buttons, struct Memory* mem, int button)
+// {
+//     if((buttons->Pressed & button) == 0) {
+//         buttons->Pressed |= button;
+//         mem->IO[IO_InterruptFlag] |= Interrupt_Joypad;
+//     }
+// }
+// void input_update(struct Memory* mem, struct Buttons* buttons)
+// {
+//     uint8_t invButtons = ~buttons->Pressed;
+//     uint8_t joyReg = mem->IO[IO_Joypad];
+//     if((joyReg & 0x20) != 0) { /* Directional keys */
+//         mem->IO[IO_Joypad] = ((joyReg & 0xF0) | ((invButtons >> 4u) & 0x0F));
+//     }
+//     else if((joyReg & 0x10) != 0) { /* Buttons */
+//         mem->IO[IO_Joypad] = ((joyReg & 0xF0) | (invButtons & 0x0F));
+//     }
+//     else if(joyReg == 3) { /* Model check - 0xFX == classic gameboy */
+//         mem->IO[IO_Joypad] = 0xFF;
+//     }
+// }
+// void gameboy_setButtonState(struct Gameboy* gb, int button, bool down)
+// {
+//     if(down) {
+//         input_setDown(&(gb->buttons), &(gb->mem), button);
+//     }
+//     else {
+//         input_setUp(&(gb->buttons), button);
+//     }
+// }
 char const* gameboy_load(struct Gameboy* gb, bool skipChecksum)
 {
     /* Reset state */

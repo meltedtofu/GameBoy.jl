@@ -163,6 +163,7 @@ mutable struct Emulator
     clock::Clock
     frameStride::Int
     video::Video
+    buttons::UInt8
 
     function Emulator(cartpath)
         clock = Clock()
@@ -173,6 +174,7 @@ mutable struct Emulator
             clock,
             160 * 4,
             Video(),
+            0,
            )
     end
 end
@@ -2059,13 +2061,27 @@ end
 const palette = [0xFFC4CFA1, 0xFF8B956D, 0xFF4D543C, 0xFF1F1F1F] # Pocket
 # const palette = [0xFF9BBC0F, 0xFF8BAC0F, 0xFF306230, 0xFF0F380F] # DMG
 
+function input_update!(mmu::Mmu, buttons::UInt8)::Nothing
+    invButtons = ~buttons
+    joyReg = mmu.io[IOJoypad]
+    if joyReg & 0x20 != 0 # Directional keys
+        mmu.io[IOJoypad] = (joyReg & 0xf0) | ((invButtons >> 4) & 0x0f)
+    elseif joyReg & 0x10 == 0 # Buttons
+        mmu.io[IOJoypad] = (joyReg & 0xf0) | invButtons & 0x0f
+    elseif joyReg == 3 # Model check - 0xfx == classic gameboy
+        mmu.io[IOJoypad] = 0xff
+    end
+
+    nothing
+end
+
 """
 Run one frame of emulation.
 """
 function doframe!(gb::Emulator)::Matrix{UInt32}
     while true
-        # TODO: Implement input_update
-#        ccall((:input_update, gblib), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), mem, buttons)
+        input_update!(gb.mmu, gb.buttons)
+
         handleInterrupts(gb, gb.cpu)
         cpu_step(gb, gb.cpu)
 
@@ -2086,7 +2102,15 @@ end
 Directly set the state of a button.
 """
 function buttonstate!(gb::Emulator, b::Button, pressed::Bool)
-    ccall((:gameboy_setButtonState, gblib), Cvoid, (Ptr{Cvoid}, Cint, Bool), gb.g, b, pressed)
+    if pressed
+        gb.buttons &= ~b
+    else
+        if gb.buttons & button == 0
+            gb.buttons |= button
+            gb.mmu.io[IOInterruptFlag] |= InterruptJoypad
+        end
+    end
+    
     nothing
 end
 
