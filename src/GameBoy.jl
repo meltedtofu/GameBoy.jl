@@ -110,18 +110,20 @@ mutable struct Mmu
     io::OffsetVector{UInt8, Vector{UInt8}}
     cart::Ref{Cartridge}
     clock::Ref{Clock}
+    dma::Ref{DMA}
     bootRomEnabled::Bool
 
-    Mmu(cart, clock) = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
-                           OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
-                           OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
-                           0x00,
-                           OffsetVector(zeros(UInt8, 0xa0), OffsetArrays.Origin(0)),
-                           OffsetVector(zeros(UInt8, 0x80), OffsetArrays.Origin(0)),
-                           Ref{Cartridge}(cart),
-                           Ref{Clock}(clock),
-                           true,
-                          )
+    Mmu(cart, clock, dma) = new(OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
+                                OffsetVector(zeros(UInt8, 0x7f), OffsetArrays.Origin(0)),
+                                OffsetVector(zeros(UInt8, 0x2000), OffsetArrays.Origin(0)),
+                                0x00,
+                                OffsetVector(zeros(UInt8, 0xa0), OffsetArrays.Origin(0)),
+                                OffsetVector(zeros(UInt8, 0x80), OffsetArrays.Origin(0)),
+                                Ref{Cartridge}(cart),
+                                Ref{Clock}(clock),
+                                Ref{DMA}(dma),
+                                true,
+                               )
 end
 
 function step!(dma::DMA, mmu::Mmu)::Nothing
@@ -158,9 +160,10 @@ mutable struct Emulator
 
     function Emulator(cartpath)
         clock = Clock()
+        dma = DMA()
         new(Cpu(),
-            Mmu(Cartridge(cartpath; skipChecksum=true), clock),
-            DMA(),
+            Mmu(Cartridge(cartpath; skipChecksum=true), clock, dma),
+            dma,
             clock,
             160 * 4,
             Video(),
@@ -338,9 +341,9 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
             if ypos <= scanline + 16 < ypos + spriteHeight # in scanline
                 # insert the sprite into the list, keeping the list in priority order
                 inspos = nsprites
-                while inspos > 0 && sprites[inspos - 1].x > xpos
+                while inspos > 0 && gb.video.scanline_sprites[inspos - 1].x > xpos
                     if inspos < 10
-                        sprites[inspos] = sprites[inspos - 1]
+                        gb.video.scanline_sprites[inspos] = sprites[inspos - 1]
                     end
                     inspos -= 1
                 end
@@ -351,17 +354,17 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
                         tile &= 0xfe
                     end
                     
-                    tiley = scanline + 16 - ypos
-                    if attr & 0x40 # y flip
-                        tiley = (spriteHeight - 1) - tiley
+                    tiley = scanline + 0x0016 - ypos
+                    if attr & 0x40 > 0 # y flip
+                        tiley = (spriteHeight - 0x0001) - tiley
                     end
                     
                     tileaddr = video_tileLineAddress(tile, tiley, true)
                     
-                    sprites[inspos].x = xpos;
-                    sprites[inspos].pixels[0] = gb.mmu.videoram[tileaddr]
-                    sprites[inspos].pixels[1] = gb.mmu.videoram[tileaddr + 1]
-                    sprites[inspos].attrs = attr
+                    gb.video.scanline_sprites[inspos].x = xpos;
+                    gb.video.scanline_sprites[inspos].pixels[0] = gb.mmu.videoram[tileaddr]
+                    gb.video.scanline_sprites[inspos].pixels[1] = gb.mmu.videoram[tileaddr + 1]
+                    gb.video.scanline_sprites[inspos].attrs = attr
                     
                     if nsprites < 10
                         nsprites += 1
@@ -604,7 +607,7 @@ function mmu_readDirect(mmu::Mmu, addr::UInt16)::UInt8
     elseif 0x8000 <= addr < 0xa000
         mmu.videoram[addr - 0x8000]
     elseif 0xa000 <= addr < 0xc000
-        Carts.read(mmu.card, addr)
+        Carts.read(mmu.cart, addr)
     elseif 0xc000 <= addr < 0xe000
         mmu.workram[addr - 0xc000]
     elseif 0xe000 <= addr < 0xfe00
@@ -652,7 +655,7 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     elseif 0xfe9f <= addr < 0xff00
         nothing
     elseif 0xff00 + IODivider == addr
-        clock_countChange!(mmu.clock[], mmu, 0)
+        clock_countChange!(mmu.clock[], mmu, 0x0000)
     elseif 0xff00 + IOTimerCounter == addr
         if mmu.clock[].loading
             mmu.io[IOTimerCounter] = val
@@ -673,8 +676,8 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     elseif 0xff00 + IOLCDY == addr
         mmu.io[IOLCDY] = 0x00
     elseif 0xff00 + IOOAMDMA == addr
-        if value <= 0xf1
-            dma.pendingsource = val
+        if val <= 0xf1
+            mmu.dma[].pendingsource = val
             delaystart = true
         end
     elseif 0xff00 + IOBootRomDisable == addr
