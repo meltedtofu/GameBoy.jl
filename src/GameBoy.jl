@@ -2094,14 +2094,7 @@ end
 Read an arbitrary byte of memory
 """
 function read(gb::Emulator, addr::UInt16)::UInt8
-    ccall((:gameboy_read, gblib), UInt8, (Ptr{Cvoid}, Cint), gb.g, addr)
-end
-
-"""
-Check that the shared library is compiled and callable.
-"""
-function sanity_check()::UInt8
-    ccall((:gameboy_sanity_check, gblib), UInt8, ())
+    mmu_readDirect(gb.mmu, addr)
 end
 
 export Emulator, free!, loadrom!, reset!, doframe!, buttonstate!, read, ram, ram!
