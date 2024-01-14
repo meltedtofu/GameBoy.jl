@@ -282,7 +282,6 @@ end
 Power cycle the emulator
 """
 function Component.reset!(gb::Emulator)
-    # TODO: move reset to per component with multiple dispatch
     enableBootRom = true
     reset!(gb.clock)
     reset!(gb.video)
@@ -435,27 +434,27 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
         finalColor = video_paletteLookup(bgPixel, readb(gb.mmu.io, IOBackgroundPalette))
 
         if spriteEnable
-            # TODO: Implement this section (See C implementation in comment below)
-#            uint8_t obp[2] = { gb->mem.IO[IO_ObjectPalette0], gb->mem.IO[IO_ObjectPalette1] };
-#            struct GameboySprite const* sprites = gb->lcd.ScanlineSprites;
-#
-#            for(unsigned int n = 0; n < gb->lcd.NumSprites; n += 1) {
-#                if(x + 8 >= sprites[n].x && x + 8 < sprites[n].x + 8) {
-#                    unsigned int tileX = x + 8 - sprites[n].x;
-#                    bool const mirrored = (sprites[n].attrs & 0x20);
-#                    uint8_t pixel = video_linePixel(sprites[n].pixels, mirrored? (7 - tileX) : tileX);
-#
-#                    if(pixel) {
-#                        bool hasPriority = (sprites[n].attrs & 0x80) == 0;
-#                        if(finalColour == 0 || hasPriority) {
-#                            uint8_t palette = obp[(sprites[n].attrs & 0x10)? 1 : 0];
-#                            finalColour = video_paletteLookup(pixel, palette);
-#                        }
-#                        /* Only draw first non-zero sprite pixel */
-#                        break;
-#                    }
-#                }
-#            }
+            obp0 = readb(gb.mmu.io, IOObjectPalette0)
+            obp1 = readb(gb.mmu.io, IOObjectPalette1)
+            n = 0
+            while n < gb.video.num_sprites
+                spiten = gb.video.scanline_sprites[n]
+                if x < spriten.x <= x+0x08
+                    tileX = x + 0x08 - spriten.x
+                    mirrored = spriten.attrs & 0x20 > 0
+                    pixel = video_linePixel(spriten.pixels, mirrored ? 7 - tileX : tileX)
+                    
+                    if pixel > 0
+                        hasPriority = spriten.attrs & 0x80 == 0
+                        if finalColor == 0 || hasPriority
+                            palette = spriten.attrs & 0x10 > 0 ? obp1 : obp0
+                            finalColor = video_paletteLookup(pixel, palette)
+                        end
+                        break
+                    end
+                end
+                n += 1
+            end
         end
 
         gb.video.buffer[x+0x01, scanline+0x01] = finalColor

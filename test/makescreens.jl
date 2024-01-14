@@ -13,3 +13,14 @@
 #    save(File{format"PNG"}("$rom.png"), reinterpret(BGRA{N0f8}, pixels))
 #  end
 #end
+
+#@testset "blargg generate screenshots" begin
+#   e = Emulator_("pokeblue.gb")
+#   
+#   for _ ∈ 1:60*60
+#     doframe!(e)
+#   end
+#   
+#   pixels = doframe!(e)
+#   save(File{format"PNG"}("pokeblue.png"), reinterpret(BGRA{N0f8}, pixels))
+#end
