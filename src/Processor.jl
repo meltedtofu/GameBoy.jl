@@ -18,6 +18,7 @@ mutable struct Cpu
     InterruptEnablePending::Bool
     Halted::Bool
     HaltBug::Bool
+    MoonEyeComplete::Bool
 
     function Cpu(bootRom::Bool=false)
         # See "The Cycle Accurate GB Doc"
@@ -35,7 +36,9 @@ mutable struct Cpu
             false,
             false,
             false,
-            false)
+            false,
+            false
+           )
     end
 end
 

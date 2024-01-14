@@ -16,7 +16,7 @@ Addresses of IO devices relative to 0xff00
 Intentionally skipping sound since it is unimplemented in this emulator
 """
 @enum IORegisters begin
-    IOJoypad=0x00
+    IOJoypad=0x10
     IOSerialData=0x01
     IOSerialControl=0x02
     IODivider=0x04
@@ -58,7 +58,7 @@ end
     InterruptLCDC=0x02
     InterruptTIMA=0x04
     InterruptSerial=0x08
-    InterruptJoypat=0x10
+    InterruptJoypad=0x10
     InterruptMask=0x1f
 end
 
@@ -105,6 +105,8 @@ function Component.reset!(v::Video)::Nothing
     Component.reset!(v.ram)
     v.newframe = false
     v.frameprogress = 0
+    v.num_sprites = 0
+    v.curx = 0
     nothing
 end
 
@@ -171,7 +173,7 @@ end
 function step!(dma::DMA, mmu::Mmu)::Nothing
     if dma.pendingsource > 0
         if !dma.delaystart
-            dma.source = dma.pendingsource << 8
+            dma.source = UInt16(dma.pendingsource) << 8
             dma.pendingsource = 0   
         end
         dma.delaystart = false
@@ -463,9 +465,10 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
     nothing
 end
 
-function video_update!(gb::Emulator, scanline::UInt8)::Nothing
+function video_update!(gb::Emulator)::Nothing
     # assert scanline <= 154
     
+    scanline = UInt8(gb.video.frameprogress ÷ 456)
     lcdOn = readb(gb.mmu.io, IOLCDControl) & 0x80 > 0x00
     write!(gb.mmu.io, IOLCDY, scanline)
     
@@ -536,11 +539,6 @@ function video_update!(gb::Emulator, scanline::UInt8)::Nothing
     nothing
 end
 
-function video_step(gb::Emulator)::Nothing
-    scanline = UInt8(gb.video.frameprogress ÷ 456)
-    video_update!(gb, scanline)
-end
-
 function clock_getTimerBit(control::UInt8, cycles::UInt16)::Bool
     switch = control & 0x03
     if switch == 0x00
@@ -592,7 +590,7 @@ function clock_increment(gb::Emulator)::Nothing
     
     # Video runs at 1 pixel per clock (4 per machine cycle)
     for _ ∈ 1:4
-        video_step(gb)
+        video_update!(gb)
     end
 end
 
@@ -622,10 +620,10 @@ function mmu_readDirect(mmu::Mmu, addr::UInt16)::UInt8
     elseif 0xc000 <= addr < 0xe000
         readb(mmu.workram, addr - 0xc000)
     elseif 0xe000 <= addr < 0xfe00
-        readb(mmu.workram, addr - 0xc000)
-    elseif 0xfe00 <= addr < 0xfe9f
+        readb(mmu.workram, addr - 0xe000)
+    elseif 0xfe00 <= addr < 0xfea0
         readb(mmu.oam, addr - 0xfe00)
-    elseif 0xfe9f <= addr < 0xff00
+    elseif 0xfea0 <= addr < 0xff00
         0x00
     elseif 0xff00 <= addr < 0xff80
         readb(mmu.io, addr - 0xff00)
@@ -639,7 +637,7 @@ end
 function mmu_read!(gb::Emulator, addr::UInt16)::UInt8
     clock_increment(gb)
 
-    if gb.dma.active && addr < 0xff00
+    if gb.dma.active && addr < 0xff80
         0xff
     else
         mmu_readDirect(gb.mmu, addr)
@@ -648,27 +646,29 @@ end
 
 function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     if addr > 0xffff
-    #elseif 0x0000 <= addr < 0x2000
+    elseif 0x0000 <= addr < 0x2000
     # TODO: Cart RAM Bank Enabled
     elseif 0x2000 <= addr < 0x6000
-        Carts.write!(mmu.cart, addr, val)
+        write!(mmu.cart, addr, val)
     elseif 0x6000 <= addr < 0x8000
         # RTC. Not implemented.
     elseif 0x8000 <= addr < 0xa000
         # TODO: Writes to VRAM should be ignored when the LCD is being redrawn
         write!(mmu.video, addr - 0x8000, val)
+    elseif 0xa000 <= addr < 0xc000
+        write!(mmu.cart, addr - 0xa000, val)
     elseif 0xc000 <= addr < 0xe000
         write!(mmu.workram, addr - 0xc000, val)
     elseif 0xe000 <= addr < 0xfe00
         write!(mmu.workram, addr - 0xe000, val)
-    elseif 0xfe00 <= addr < 0xfe9f
+    elseif 0xfe00 <= addr < 0xfea0
         write!(mmu.oam, addr - 0xfe00, val)
-    elseif 0xfe9f <= addr < 0xff00
+    elseif 0xfea0 <= addr < 0xff00
         nothing
     elseif 0xff00 + IODivider == addr
         clock_countChange!(mmu.clock[], mmu, 0x0000)
     elseif 0xff00 + IOTimerCounter == addr
-        if mmu.clock[].loading
+        if !mmu.clock[].loading
             write!(mmu.io, IOTimerCounter, val)
             mmu.clock[].overflow = false
         end
@@ -689,7 +689,7 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     elseif 0xff00 + IOOAMDMA == addr
         if val <= 0xf1
             mmu.dma[].pendingsource = val
-            delaystart = true
+            mmu.dma[].delaystart = true
         end
     elseif 0xff00 + IOBootRomDisable == addr
         mmu.bootRomEnabled = false
@@ -706,10 +706,11 @@ end
 function mmu_write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
     clock_increment(gb)
 
-    if !gb.dma.active || addr > 0xff00
+    if gb.dma.active && addr < 0xff00
+        nothing
+    else
         mmu_writeDirect!(gb.mmu, addr, val)
     end
-    nothing
 end
 
 
@@ -783,11 +784,8 @@ ZNHC!(cpu::Cpu, z::Bool, n::Bool, h::Bool, c::Bool)::Nothing = begin
 end
 
 function Push16!(gb::Emulator, cpu::Cpu, val::UInt16)::Nothing
-
-    lowbyteaddr = cpu.SP - 0x0002
-    highbyteaddr = cpu.SP - 0x0001
-    mmu_write!(gb, lowbyteaddr, UInt8(val&0xff))
-    mmu_write!(gb, highbyteaddr, UInt8(val >> 8))
+    mmu_write!(gb, cpu.SP - 0x0001, UInt8(val >> 8))
+    mmu_write!(gb, cpu.SP - 0x0002, UInt8(val&0xff))
 
     cpu.SP -= 0x0002
 
@@ -1039,12 +1037,9 @@ function jumprel!(cpu::Cpu, offset::Int8)::Nothing
 end
 
 function call!(gb::Emulator, cpu::Cpu, addr::UInt16)::Nothing
-
-    old = cpu.PC
-    Push16!(gb, cpu, old)
-
+    clock_increment(gb)
+    Push16!(gb, cpu, cpu.PC)
     cpu.PC = addr
-
     nothing
 end
 
@@ -1297,9 +1292,9 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         rra!(cpu)
         Z!(cpu, false)
     elseif opcode == 0x20
-        clock_increment(gb)
         offset = imm8i(gb, cpu)
         if !Z(cpu)
+            clock_increment(gb)
             jumprel!(cpu, offset)
         end
     elseif opcode == 0x21
@@ -1326,9 +1321,9 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0x27
         Daa!(cpu)
     elseif opcode == 0x28
-        clock_increment(gb)
         offset = imm8i(gb, cpu)
         if Z(cpu)
+            clock_increment(gb)
             jumprel!(cpu, offset)
         end
     elseif opcode == 0x29
@@ -1357,9 +1352,9 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         N!(cpu, true)
         H!(cpu, true)
     elseif opcode == 0x30
-        clock_increment(gb)
         offset = imm8i(gb, cpu)
         if !C(cpu)
+            clock_increment(gb)
             jumprel!(cpu, offset)
         end
     elseif opcode == 0x31
@@ -1402,9 +1397,9 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         H!(cpu, false)
         C!(cpu, true)
     elseif opcode == 0x38
-        clock_increment(gb)
         offset = imm8i(gb, cpu)
         if C(cpu)
+            clock_increment(gb)
             jumprel!(cpu, offset)
         end
     elseif opcode == 0x39
@@ -1433,6 +1428,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         H!(cpu, false)
         C!(cpu, !C(cpu))
     elseif opcode == 0x40
+        cpu.MoonEyeComplete = true
         cpu.B = cpu.B
     elseif opcode == 0x41
         cpu.B = cpu.C
@@ -1777,14 +1773,12 @@ function cpu_step(gb::Emulator, cpu::Cpu)
             jump!(cpu, addr)
         end
     elseif opcode == 0xc3
-        clock_increment(gb)
-
         addr = imm16(gb, cpu)
+        clock_increment(gb)
         jump!(cpu, addr)
     elseif opcode == 0xc4
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
 
         if !Z(cpu)
             call!(gb, cpu, addr)
@@ -1792,9 +1786,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
 
     elseif opcode == 0xc5
         clock_increment(gb)
-
         val = BC(cpu)
-
         Push16!(gb, cpu, val)
 
     elseif opcode == 0xc6
@@ -1802,7 +1794,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val = imm8(gb, cpu)
         cpu.A = Add8!(cpu, cpu.A, val, false)
     elseif opcode == 0xc7
-        clock_increment(gb)
         call!(gb, cpu, 0x0000)
 
     elseif opcode == 0xc8
@@ -1830,23 +1821,16 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xcc
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
-
         if Z(cpu)
             call!(gb, cpu, addr)
         end
 
     elseif opcode == 0xcd
-        addr = imm16(gb, cpu)
-
-        clock_increment(gb)
-        call!(gb, cpu, addr)
-
+        call!(gb, cpu, imm16(gb, cpu))
     elseif opcode == 0xce
         val = imm8(gb, cpu)
         cpu.A = Add8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0xcf
-        clock_increment(gb)
         call!(gb, cpu, 0x0008)
 
     elseif opcode == 0xd0
@@ -1871,8 +1855,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xd4
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
-
         if !C(cpu)
             call!(gb, cpu, addr)
         end
@@ -1889,7 +1871,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val = imm8(gb, cpu)
         cpu.A = Sub8!(cpu, cpu.A, val, false)
     elseif opcode == 0xd7
-        clock_increment(gb)
         call!(gb, cpu, 0x0010)
 
     elseif opcode == 0xd8
@@ -1915,8 +1896,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xdc
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
-
         if C(cpu)
             call!(gb, cpu, addr)
         end
@@ -1925,7 +1904,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val = imm8(gb, cpu)
         cpu.A = Sub8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0xdf
-        clock_increment(gb)
         call!(gb, cpu, 0x0018)
 
     elseif opcode == 0xe0
@@ -1956,7 +1934,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val = imm8(gb, cpu)
         And!(cpu, val)
     elseif opcode == 0xe7
-        clock_increment(gb)
         call!(gb, cpu, 0x0020)
 
     elseif opcode == 0xe8
@@ -1984,7 +1961,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val = imm8(gb, cpu)
         Xor!(cpu, val)
     elseif opcode == 0xef
-        clock_increment(gb)
         call!(gb, cpu, 0x0028)
 
     elseif opcode == 0xf0
@@ -2017,7 +1993,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val = imm8(gb, cpu)
         Or!(cpu, val)
     elseif opcode == 0xf7
-        clock_increment(gb)
         call!(gb, cpu, 0x0030)
 
     elseif opcode == 0xf8
@@ -2049,7 +2024,6 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val = imm8(gb, cpu)
         Cp!(cpu, cpu.A, val)
     elseif opcode == 0xff
-        clock_increment(gb)
         call!(gb, cpu, 0x0038)
 
     end
@@ -2062,11 +2036,10 @@ function handleInterrupts(gb::Emulator, cpu::Cpu)
     if irqs > 0
         cpu.Halted = false
         if cpu.InterruptsEnabled
-            for i ∈ 0:5
+            for i ∈ 0:4
                 bit = 0x01 << i
                 if irqs & bit > 0
                     cpu.InterruptsEnabled = false
-                    clock_increment(gb)
                     clock_increment(gb)
                     clock_increment(gb)
                     call!(gb, cpu, 0x40 + UInt16(i)*0x08)

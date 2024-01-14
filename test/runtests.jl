@@ -23,6 +23,9 @@ end
           end
       else
           # Nested Tests
+          if length(tests) == 0
+            continue
+          end
           @testset "$(chop(root, head=length(testdir)+1, tail=0))" begin
               for t in tests
                   include(joinpath(root, t))

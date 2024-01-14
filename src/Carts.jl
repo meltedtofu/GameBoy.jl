@@ -40,7 +40,7 @@ function Component.write!(mbc::MBC1, addr::UInt16, data::UInt8, ram::Ref{OffsetV
         mbc.active_ram_bank = data & 0x03
     elseif 0xa000 <= addr < 0xc000
         reladdr = addr - 0xa0000
-        ram[][mbc.active_ram_bank * 0x2000 + reladdr] = data
+        ram[][UInt16(mbc.active_ram_bank) * 0x2000 + reladdr] = data
     end
     nothing
 end
