@@ -1046,6 +1046,7 @@ end
 function ret!(gb::Emulator, cpu::Cpu)::Nothing
     addr = Pop16!(gb, cpu)
 
+    clock_increment(gb)
     jump!(cpu, addr)
 
     nothing
@@ -1767,9 +1768,8 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xc2
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
-
         if !Z(cpu)
+            clock_increment(gb)
             jump!(cpu, addr)
         end
     elseif opcode == 0xc3
@@ -1804,15 +1804,13 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         end
 
     elseif opcode == 0xc9
-        clock_increment(gb)
         ret!(gb, cpu)
 
     elseif opcode == 0xca
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
-
         if Z(cpu)
+            clock_increment(gb)
             jump!(cpu, addr)
         end
     elseif opcode == 0xcb
@@ -1847,9 +1845,8 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xd2
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
-
         if !C(cpu)
+            clock_increment(gb)
             jump!(cpu, addr)
         end
     elseif opcode == 0xd4
@@ -1881,16 +1878,14 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         end
 
     elseif opcode == 0xd9
-        clock_increment(gb)
         ret!(gb, cpu)
 
         cpu.InterruptsEnabled = true
     elseif opcode == 0xda
         addr = imm16(gb, cpu)
 
-        clock_increment(gb)
-
         if C(cpu)
+            clock_increment(gb)
             jump!(cpu, addr)
         end
     elseif opcode == 0xdc
