@@ -1,5 +1,5 @@
 using GameBoy
-using Test
+using XUnit
 
 using FileIO
 using Images
@@ -11,7 +11,7 @@ function Emulator_(cartridge_name::String...)::Emulator
     e
 end
 
-@testset "GameBoy" begin
+@testset runner=ParallelTestRunner() "GameBoy" begin
   testdir = dirname(@__FILE__)
 
   for (root, dirs, files) in walkdir(testdir)

@@ -1,5 +1,5 @@
 @testset "blargg" begin
-  @testset "cpu_instrs" begin
+  @testcase "cpu_instrs" begin
     e = Emulator_("blargg", "cpu_instrs.gb")
 
     for _ ∈ 1:60*60
@@ -12,7 +12,7 @@
     @test expected == reinterpret(BGRA{N0f8}, pixels)
   end
   
-  @testset "halt_bug" begin
+  @testcase "halt_bug" begin
     e = Emulator_("blargg", "halt_bug.gb")
 
     for _ ∈ 1:60*60
@@ -25,7 +25,7 @@
     @test expected == reinterpret(BGRA{N0f8}, pixels)
   end
   
-  @testset "instr_timing" begin
+  @testcase "instr_timing" begin
     e = Emulator_("blargg", "instr_timing.gb")
 
     for _ ∈ 1:60*60
@@ -38,7 +38,7 @@
     @test expected == reinterpret(BGRA{N0f8}, pixels)
   end
   
-  @testset "mem_timing" begin
+  @testcase "mem_timing" begin
     e = Emulator_("blargg", "mem_timing.gb")
 
     for _ ∈ 1:60*60
@@ -51,7 +51,7 @@
     @test expected == reinterpret(BGRA{N0f8}, pixels)
   end
   
-  @testset "oam_bug" begin
+  @testcase "oam_bug" begin
     e = Emulator_("blargg", "oam_bug.gb")
 
     for _ ∈ 1:60*60
