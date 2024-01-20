@@ -10,17 +10,18 @@ function idx(mbc::MemoryBankController, addr::UInt16, romsize::UInt32)::Tuple{In
     if addr < 0x4000
         (addr, -1)
     elseif 0x4000 <= addr  < 0x8000
-		cartaddr = (mbc.active_rom_bank * 0x4000) + (addr - 0x4000)
+		cartaddr = (UInt32(mbc.active_rom_bank) * 0x4000) + (addr - 0x4000)
+
         (cartaddr%romsize, -1)
     elseif 0xa000 <= addr < 0xc000
         reladdr = addr - 0xa000
-        (-1, mbc.active_ram_bank * 0x2000 + reladdr)
+        (-1, UInt32(mbc.active_ram_bank) * 0x2000 + reladdr)
     end
 end
 
 struct NoMBC <: MemoryBankController end
 
-idx(mbc::NoMBC, addr::UInt16, romsize::UInt32) = (addr, 0)
+idx(mbc::NoMBC, addr::UInt16, romsize::UInt32)::Tuple{Int, Int}  = (addr, -1)
 Component.write!(mbc::NoMBC, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing = nothing
 
 mutable struct MBC1 <: MemoryBankController
@@ -51,6 +52,8 @@ mutable struct MBC2 <: MemoryBankController
 
     MBC2() = new(0x01)
 end
+
+idx(mbc::MBC2, addr::UInt16, romsize::UInt32)::Tuple{Int, Int} = (addr, -1)
 
 function Component.write!(mbc::MBC2, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
     if 0x2000 <= addr < 0x4000

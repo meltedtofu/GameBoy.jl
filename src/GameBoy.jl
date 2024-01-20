@@ -356,7 +356,7 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
                 inspos = nsprites
                 while inspos > 0 && gb.video.scanline_sprites[inspos - 1].x > xpos
                     if inspos < 10
-                        gb.video.scanline_sprites[inspos] = sprites[inspos - 1]
+                        gb.video.scanline_sprites[inspos] = gb.video.scanline_sprites[inspos - 1]
                     end
                     inspos -= 1
                 end
@@ -428,7 +428,7 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
         
         bgPixel = 0x00
         if winEnable && x + 0x07 >= wx
-            bgPixel = video_mapPixel(gb, hiMapWin, loTiles, x+7-wx, scanline-wy)
+            bgPixel = video_mapPixel(gb, hiMapWin, loTiles, UInt16(x+0x07-wx), UInt16(scanline-wy))
         elseif bgEnable
             bgPixel = video_mapPixel(gb, hiMapBg, loTiles, (x+scx)%0x0100, (scanline+scy)%0x0100)
         end
@@ -440,11 +440,11 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
             obp1 = readb(gb.mmu.io, IOObjectPalette1)
             n = 0
             while n < gb.video.num_sprites
-                spiten = gb.video.scanline_sprites[n]
+                spriten = gb.video.scanline_sprites[n]
                 if x < spriten.x <= x+0x08
                     tileX = x + 0x08 - spriten.x
                     mirrored = spriten.attrs & 0x20 > 0
-                    pixel = video_linePixel(spriten.pixels, mirrored ? 7 - tileX : tileX)
+                    pixel = video_linePixel(spriten.pixels[0], spriten.pixels[1], UInt16(mirrored ? 0x07 - tileX : tileX))
                     
                     if pixel > 0
                         hasPriority = spriten.attrs & 0x80 == 0
