@@ -6,11 +6,12 @@ using ..Component
 
 abstract type MemoryBankController end
 
-function idx(mbc::MemoryBankController, addr::UInt16)::Tuple{Int, Int}
+function idx(mbc::MemoryBankController, addr::UInt16, romsize::UInt32)::Tuple{Int, Int}
     if addr < 0x4000
         (addr, -1)
     elseif 0x4000 <= addr  < 0x8000
-        (mbc.active_rom_bank * 0x4000 + (addr-0x4000), -1)
+		cartaddr = (mbc.active_rom_bank * 0x4000) + (addr - 0x4000)
+        (cartaddr%romsize, -1)
     elseif 0xa000 <= addr < 0xc000
         reladdr = addr - 0xa000
         (-1, mbc.active_ram_bank * 0x2000 + reladdr)
@@ -19,7 +20,7 @@ end
 
 struct NoMBC <: MemoryBankController end
 
-idx(mbc::NoMBC, addr::UInt16) = (addr, 0)
+idx(mbc::NoMBC, addr::UInt16, romsize::UInt32) = (addr, 0)
 Component.write!(mbc::NoMBC, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing = nothing
 
 mutable struct MBC1 <: MemoryBankController
@@ -35,9 +36,9 @@ function Component.write!(mbc::MBC1, addr::UInt16, data::UInt8, ram::Ref{OffsetV
         if bankno == 0
             bankno = 1
         end
-        mbc.active_rom_bank = bankno
+        mbc.active_rom_bank = (mbc.active_rom_bank & 0xe0) | bankno
     elseif 0x4000 <= addr < 0x6000
-        mbc.active_ram_bank = data & 0x03
+    	mbc.active_rom_bank = (mbc.active_rom_bank & 0x1f) | ((data & 0x03) << 5)
     elseif 0xa000 <= addr < 0xc000
         reladdr = addr - 0xa0000
         ram[][UInt16(mbc.active_ram_bank) * 0x2000 + reladdr] = data
@@ -50,9 +51,6 @@ mutable struct MBC2 <: MemoryBankController
 
     MBC2() = new(0x01)
 end
-
-# TODO: These chips include 512 half bytes of RAM built into the MBC2 itself
-idx(mbc::MBC2, addr::UInt16) = addr
 
 function Component.write!(mbc::MBC2, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
     if 0x2000 <= addr < 0x4000
@@ -92,20 +90,23 @@ mutable struct MBC5 <: MemoryBankController
     active_rom_bank::UInt16
     active_ram_bank::UInt8
 
-    MBC5() = new(0x01)
+    MBC5() = new(0x01, 0x01)
 end
 
 function Component.write!(mbc::MBC5, addr::UInt16, data::UInt8, ram::Ref{OffsetVector{UInt8, Vector{UInt8}}})::Nothing
+    old = mbc.active_rom_bank
+
     if 0x2000 <= addr < 0x3000
-        mbc.active_rom_bank = (mbc.active_rom_bank & ~0xff) | data
+        mbc.active_rom_bank = (mbc.active_rom_bank & 0xff00) | UInt16(data)
     elseif 0x3000 <= addr < 0x4000
-        mbc.active_rom_bank = (mbc.active_rom_bank & 0xff) | ((data & 0x01) << 9)
+        mbc.active_rom_bank = (mbc.active_rom_bank & 0x00ff) | ((UInt16(data) & 0x0001) << 9)
     elseif 0x4000 <= addr < 0x6000
         mbc.active_ram_bank = data & 0x0f
     elseif 0xa000 <= addr < 0xc000
         reladdr = addr - 0xa0000
         ram[][mbc.active_ram_bank * 0x2000 + reladdr] = data
     end
+    
     nothing
 end
 
@@ -181,6 +182,26 @@ function detect_cart_type(b::UInt8)::Tuple{MemoryBankController, ExtraFeatureFla
     end
 end
 
+function detect_rom_size(b::UInt8)::UInt32
+	if b == 0x00
+		32768
+	elseif b == 0x01
+		65536
+	elseif b == 0x02
+		131072
+	elseif b == 0x03
+		262144
+	elseif b == 0x04
+		524288
+	elseif b == 0x05
+		1048576
+	elseif b == 0x06
+		2097152
+	else
+		32768
+	end
+end
+
 """
 The place that stores game data.
 Traditionally stored on removable media to swap between different games.
@@ -188,6 +209,7 @@ Traditionally stored on removable media to swap between different games.
 mutable struct Cartridge
     rom::OffsetVector{UInt8, Vector{UInt8}}
     ram::OffsetVector{UInt8, Vector{UInt8}}
+    romsize::UInt32
     mbc::MemoryBankController
     title::String
     features::ExtraFeatureFlags
@@ -213,6 +235,8 @@ mutable struct Cartridge
         title = [rom[0x0134 + i] for i ∈ 0x00:0x0f] |> Base.Fix1(filter, b -> 0x00 < b < 0x80) |> String
 
         (mbc, features) = detect_cart_type(rom[0x147])
+        
+        romsize = detect_rom_size(rom[0x148])
 
         ramsize = 0
         if features.ram
@@ -223,6 +247,7 @@ mutable struct Cartridge
 
         new(rom,
             ram,
+            romsize,
             mbc,
             title,
             features,
@@ -231,7 +256,7 @@ mutable struct Cartridge
 end
 
 function Component.readb(c::Cartridge, addr::UInt16)::UInt8
-    (romidx, ramidx) = idx(c.mbc, addr)
+    (romidx, ramidx) = idx(c.mbc, addr, c.romsize)
     if romidx >= 0
         c.rom[romidx]
     elseif ramidx >= 0
