@@ -7,43 +7,23 @@ using .Component
 include("Processor.jl")
 using .Processor
 
+include("RandomAccessMemory.jl")
+using .RandomAccessMemory
+
+include("IO.jl")
+using .IO
+
+include("Interrupts.jl")
+using .Interrupts
+
 include("Carts.jl")
 using .Carts
 
-"""
-Addresses of IO devices relative to 0xff00
-
-Intentionally skipping sound since it is unimplemented in this emulator
-"""
-@enum IORegisters begin
-    IOJoypad=0x10
-    IOSerialData=0x01
-    IOSerialControl=0x02
-    IODivider=0x04
-    IOTimerCounter=0x05
-    IOTimerModulo=0x06
-    IOTimerControl=0x07
-    IOInterruptFlag=0x0f
-    IOLCDControl=0x40
-    IOLCDStat=0x41
-    IOScrollY=0x42
-    IOScrollX=0x43
-    IOLCDY=0x44
-    IOLCDYCompare=0x45
-    IOOAMDMA=0x46
-    IOBackgroundPalette=0x47
-    IOObjectPalette0=0x48
-    IOObjectPalette1=0x49
-    IOWindowY=0x4a
-    IOWindowX=0x4b
-    IOBootRomDisable=0x50
-end
+include("Video.jl")
+using .Video
 
 include("DirectMemoryAccess.jl")
 using .DirectMemoryAccess
-
-include("RandomAccessMemory.jl")
-using .RandomAccessMemory
 
 Component.readb(ram::Ram, addr::IORegisters)::UInt8 = readb(ram, UInt16(addr))
 Component.write!(ram::Ram, addr::IORegisters, v::UInt8)::Nothing = write!(ram, UInt16(addr), v)
@@ -52,72 +32,6 @@ macro exportinstances(enum)
     eval = GlobalRef(Core, :eval)
     return :($eval($__module__, Expr(:export, map(Symbol, instances($enum))...)))
 end
-
-@enum Interrupt begin
-    InterruptVBlank=0x01
-    InterruptLCDC=0x02
-    InterruptTIMA=0x04
-    InterruptSerial=0x08
-    InterruptJoypad=0x10
-    InterruptMask=0x1f
-end
-
-mutable struct Sprite
-    x::UInt8
-    pixel0::UInt8
-    pixel1::UInt8
-    attrs::UInt8
-    
-    Sprite() = new(0, 0, 0, 0)
-end
-
-"""
-Video subsystem
-"""
-mutable struct Video{T}
-    frameprogress::UInt
-    ram::Ram
-    mmu::Base.RefValue{T}
-
-    # Bits 0-1 = color (0 = darkest, 3 = lightest)
-    # Remaining Bits are zero
-    buffer::Matrix{UInt8}
-
-    # The pixels to send to SDl as AARGGBB values interpreted through the default palette
-    frame::Matrix{UInt32}
-
-    newframe::Bool
-
-    scanline_sprites::OffsetVector{Sprite, Vector{Sprite}}
-    num_sprites::UInt8
-    curx::UInt8
-
-    Video{T}() where {T} = Video{T}(nothing)
-    Video{T}(t::Union{Nothing, T}) where {T} = new(0,
-                                         Ram(0x2000),
-                                         isnothing(t) ? Ref{T}() : Ref(t),
-                                         Matrix{UInt8}(undef, 160, 144),
-                                         Matrix{UInt32}(undef, 144, 160),
-                                         false,
-                                         OffsetVector([Sprite() for _ in 1:10], OffsetArrays.Origin(0)),
-                                         0,
-                                         0,
-                                        )
-end
-
-function Component.reset!(v::Video)::Nothing
-    Component.reset!(v.ram)
-    v.newframe = false
-    v.frameprogress = 0
-    v.num_sprites = 0
-    v.curx = 0
-    nothing
-end
-
-Component.readb(v::Ref{Video}, addr::UInt16)::UInt8 = readb(v[], addr)
-Component.readb(v::Video, addr::UInt16)::UInt8 = readb(v.ram, addr)
-Component.write!(v::Ref{Video}, addr::UInt16, val::UInt8):: Nothing = write!(v[], addr, val)
-Component.write!(v::Video, addr::UInt16, val::UInt8)::Nothing = write!(v.ram, addr, val)
 
 """
 Main System Clock
@@ -150,20 +64,20 @@ mutable struct Mmu
     cart::Base.RefValue{Cartridge}
     clock::Base.RefValue{Clock}
     dma::Base.RefValue{DMA}
-    video::Base.RefValue{Video}
+    ppu::Base.RefValue{PPU}
     bootRomEnabled::Bool
 
-    Mmu(cart, clock, dma, video) = new(Ram(0x2000),
-                                       Ram(0x007f),
-                                       0x00,
-                                       Ram(0x00a0),
-                                       Ram(0x0080),
-                                       Ref{Cartridge}(cart),
-                                       Ref{Clock}(clock),
-                                       Ref{DMA}(dma),
-                                       Ref{Video}(video),
-                                       true,
-                                      )
+    Mmu(cart, clock, dma, ppu) = new(Ram(0x2000),
+                                     Ram(0x007f),
+                                     0x00,
+                                     Ram(0x00a0),
+                                     Ram(0x0080),
+                                     Ref{Cartridge}(cart),
+                                     Ref{Clock}(clock),
+                                     Ref{DMA}(dma),
+                                     Ref{PPU}(ppu),
+                                     true,
+                                    )
 end
 
 function Component.reset!(mmu::Mmu, enableBootRom::Bool)::Nothing
@@ -203,22 +117,22 @@ mutable struct Emulator
     dma::DMA
     clock::Clock
     frameStride::Int
-    video::Video{Mmu}
+    ppu::PPU{Mmu}
     buttons::UInt8
 
     function Emulator(cartpath)
         clock = Clock()
         dma = DMA()
-        video = Video{Mmu}()
-        mmu = Mmu(Cartridge(cartpath; skipChecksum=true), clock, dma, video)
-        video.mmu = Ref(mmu)
+        ppu = PPU{Mmu}()
+        mmu = Mmu(Cartridge(cartpath; skipChecksum=true), clock, dma, ppu)
+        ppu.mmu = Ref(mmu)
 
         new(Cpu(),
             mmu,
             dma,
             clock,
             160 * 4,
-            video,
+            ppu,
             0,
            )
     end
@@ -292,7 +206,7 @@ Power cycle the emulator
 function Component.reset!(gb::Emulator)
     enableBootRom = true
     reset!(gb.clock)
-    reset!(gb.video)
+    reset!(gb.ppu)
     reset!(gb.mmu, enableBootRom)
     
     write!(gb.mmu.io, IOJoypad, 0xcf)
@@ -335,218 +249,6 @@ const bootrom = Ram([
     0x21,0x04,0x01,0x11,0xA8,0x00,0x1A,0x13,0xBE,0x20,0xFE,0x23,0x7D,0xFE,0x34,0x20,
     0xF5,0x06,0x19,0x78,0x86,0x23,0x05,0x20,0xFB,0x86,0x20,0xFE,0x3E,0x01,0xE0,0x50
    ])
-
-function video_tileLineAddress(index::UInt8, y::UInt16, lowBank::Bool)::UInt16
-    # Addresses relative to video ram base address
-    addr = 0x0000
-    if lowBank
-        addr = index * 16
-    else
-        addr = 0x1000 + reinterpret(Int8, index) * 16
-    end
-    
-    addr + 2y
-end
-
-function video_readSprites!(video::Video, scanline::UInt8)::Nothing
-    spriteHeight = readb(video.mmu[].io, IOLCDControl) & 0x04 > 0 ? 16 : 8
-    
-    nsprites = 0
-    i::UInt16 = 0x0000
-    while i < 160
-        ypos = readb(video.mmu[].oam, i)
-        xpos = readb(video.mmu[].oam, i+0x01)
-        if 0 < ypos < 160 && xpos < 168 # on screen
-            if ypos <= scanline + 0x10 < ypos + spriteHeight # in scanline
-                # insert the sprite into the list, keeping the list in priority order
-                inspos = nsprites
-                while inspos > 0 && video.scanline_sprites[inspos - 1].x > xpos
-                    if inspos < 10
-                        video.scanline_sprites[inspos].x      = video.scanline_sprites[inspos - 1].x
-                        video.scanline_sprites[inspos].pixel0 = video.scanline_sprites[inspos - 1].pixel0
-                        video.scanline_sprites[inspos].pixel1 = video.scanline_sprites[inspos - 1].pixel1
-                        video.scanline_sprites[inspos].attrs  = video.scanline_sprites[inspos - 1].attrs
-                    end
-                    inspos -= 1
-                end
-                if inspos < 10
-                    tile = readb(video.mmu[].oam, i+0x02)
-                    attr = readb(video.mmu[].oam, i+0x03)
-                    if spriteHeight == 16
-                        tile &= 0xfe
-                    end
-                    
-                    tiley = scanline + 0x0010 - ypos
-                    if attr & 0x40 > 0 # y flip
-                        tiley = (spriteHeight - 0x0001) - tiley
-                    end
-                    
-                    tileaddr = video_tileLineAddress(tile, tiley, true)
-
-                    video.scanline_sprites[inspos].x = xpos;
-                    video.scanline_sprites[inspos].pixel0 = readb(video, tileaddr)
-                    video.scanline_sprites[inspos].pixel1 = readb(video, tileaddr + 0x01)
-                    video.scanline_sprites[inspos].attrs = attr
-
-                    if nsprites < 10
-                        nsprites += 1
-                    end
-                end
-            end
-        end
-        i += 4
-    end
-    
-    video.num_sprites = nsprites
-
-    nothing
-end
-
-function video_linePixel(l1::UInt8, l2::UInt8, x::UInt16)::UInt8
-    (((UInt16(l1) << x) & 0x0080) >> 7) | (((UInt16(l2) << x) & 0x0080) >> 6)
-end
-
-function video_mapPixel(video::Video, hiMap::Bool, loTiles::Bool, x::UInt16, y::UInt16)::UInt8
-    tileIndex = readb(video, UInt16((hiMap ? 0x1c00 : 0x1800) + ((y ÷ 8)*32) + (x ÷ 8)))
-    addr = video_tileLineAddress(tileIndex, y%0x08, loTiles)
-    video_linePixel(readb(video, addr), readb(video, addr+0x0001), x%0x0008)
-end
-
-function video_paletteLookup(pixel::UInt8, palette::UInt8)
-    (palette >> (pixel*2)) & 0x03
-end
-
-function video_drawPixel!(video::Video, scanline::UInt8, x::UInt8)::Nothing
-    lcdc = readb(video.mmu[].io, IOLCDControl)
-    hiMapBg = lcdc & 0x08 > 0 
-    hiMapWin = lcdc & 0x40 > 0
-    bgEnable = lcdc & 0x01 > 0
-    winEnable = lcdc & 0x20 > 0
-    spriteEnable = lcdc & 0x02 > 0
-    loTiles = lcdc & 0x10 > 0
-    
-    wy = readb(video.mmu[].io, IOWindowY)
-    wx = readb(video.mmu[].io, IOWindowX)
-    
-    winEnable = winEnable && wx < 167 && wy < 144 && wy <= scanline
-    spriteEnable = spriteEnable && video.num_sprites > 0
-
-    if winEnable || bgEnable || spriteEnable
-        scy = readb(video.mmu[].io, IOScrollY)
-        scx = readb(video.mmu[].io, IOScrollX)
-        
-        bgPixel = 0x00
-        if winEnable && x + 0x07 >= wx
-            bgPixel = video_mapPixel(video, hiMapWin, loTiles, UInt16(x+0x07-wx), UInt16(scanline-wy))
-        elseif bgEnable
-            bgPixel = video_mapPixel(video, hiMapBg, loTiles, (UInt16(x)+scx)%0x0100, (UInt16(scanline)+scy)%0x0100)
-        end
-
-        finalColor = video_paletteLookup(bgPixel, readb(video.mmu[].io, IOBackgroundPalette))
-
-        if spriteEnable
-            obp0 = readb(video.mmu[].io, IOObjectPalette0)
-            obp1 = readb(video.mmu[].io, IOObjectPalette1)
-            n = 0
-            while n < video.num_sprites
-                spriten = video.scanline_sprites[n]
-                if spriten.x <= x + 0x08 < spriten.x + 0x08
-                    tileX = x + 0x08 - spriten.x
-                    mirrored = spriten.attrs & 0x20 > 0
-                    pixel = video_linePixel(spriten.pixel0, spriten.pixel1, UInt16(mirrored ? 0x07 - tileX : tileX))
-                    
-                    if pixel > 0
-                        hasPriority = spriten.attrs & 0x80 == 0
-                        if finalColor == 0 || hasPriority
-                            palette = spriten.attrs & 0x10 > 0 ? obp1 : obp0
-                            finalColor = video_paletteLookup(pixel, palette)
-                        end
-                        break
-                    end
-                end
-                n += 1
-            end
-        end
-
-        video.buffer[x+0x01, scanline+0x01] = finalColor
-    end
-
-    nothing
-end
-
-function video_update!(video::Video)::Nothing
-    # assert scanline <= 154
-    
-    scanline = UInt8(video.frameprogress ÷ 456)
-    lcdOn = readb(video.mmu[].io, IOLCDControl) & 0x80 > 0x00
-    write!(video.mmu[].io, IOLCDY, scanline)
-
-    stat = readb(video.mmu[].io, IOLCDStat)
-    
-    if lcdOn
-        if scanline == readb(video.mmu[].io, IOLCDYCompare)
-            if (stat & 0x04) == 0x00
-                write!(video.mmu[].io, IOLCDStat, readb(video.mmu[].io, IOLCDStat) | 0x04)
-                if stat & 0x40 > 0x00
-                    write!(video.mmu[].io, IOInterruptFlag, readb(video.mmu[].io, IOInterruptFlag) | InterruptLCDC)
-                end
-            end
-        else
-            write!(video.mmu[].io, IOLCDStat, readb(video.mmu[].io, IOLCDStat) & ~0x04)
-        end
-    end
-    
-    lcdMode = stat & 0x03
-    
-    if scanline >= 144 # last 10 scanlines are vblank. don't draw anything
-        if lcdMode != 1
-            write!(video.mmu[].io, IOLCDStat, (stat & ~0x03) | 0x01)
-            write!(video.mmu[].io, IOInterruptFlag, readb(video.mmu[].io, IOInterruptFlag) | InterruptVBlank)
-            if readb(video.mmu[].io, IOLCDControl) & 0x80 == 0
-                fill!(video.buffer, 0x00)
-            end
-            video.newframe = true
-        end
-    else
-        scanlineProgress = video.frameprogress % 456
-        
-        if scanlineProgress < 92
-            if lcdMode != 2
-                write!(video.mmu[].io, IOLCDStat, (stat & 0x03) | 0x02)
-                if stat & 0x20 > 0x00
-                    write!(video.mmu[].io, IOInterruptFlag, readb(video.mmu[].io, IOInterruptFlag) | InterruptLCDC)
-                end
-                video_readSprites!(video, scanline)
-                video.curx = 0
-            end
-        elseif scanlineProgress < 160 + 92
-            write!(video.mmu[].io, IOLCDStat, (stat & ~0x03) | 0x03)
-            if lcdOn
-                while video.curx < scanlineProgress - 92
-                    video_drawPixel!(video, scanline, video.curx)
-                    video.curx += 1
-                end
-            end
-        else
-            if lcdMode != 0
-                if lcdOn
-                    while video.curx < 160
-                        video_drawPixel!(video, scanline, video.curx) 
-                        video.curx += 1
-                    end
-                end
-                write!(video.mmu[].io, IOLCDStat, (stat & ~0x03))
-                if stat & 0x08 > 0x00
-                    write!(video.mmu[].io, IOInterruptFlag, readb(video.mmu[].io, IOInterruptFlag) | InterruptLCDC)
-                end
-            end
-        end
-    end
-    
-    video.frameprogress = (video.frameprogress + 1) % 70224
-    
-    nothing
-end
 
 function clock_getTimerBit(control::UInt8, cycles::UInt16)::Bool
     switch = control & 0x03
@@ -599,7 +301,7 @@ function clock_increment(gb::Emulator)::Nothing
     
     # Video runs at 1 pixel per clock (4 per machine cycle)
     for _ ∈ 1:4
-        video_update!(gb.video)
+        update!(gb.ppu)
     end
 end
 
@@ -623,7 +325,7 @@ function mmu_readDirect(mmu::Mmu, addr::UInt16)::UInt8
     elseif 0x0000 <= addr < 0x8000
         readb(mmu.cart, addr)
     elseif 0x8000 <= addr < 0xa000
-        readb(mmu.video, addr - 0x8000)
+        readb(mmu.ppu, addr - 0x8000)
     elseif 0xa000 <= addr < 0xc000
         readb(mmu.cart, addr)
     elseif 0xc000 <= addr < 0xe000
@@ -663,7 +365,7 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
         # RTC. Not implemented.
     elseif 0x8000 <= addr < 0xa000
         # TODO: Writes to VRAM should be ignored when the LCD is being redrawn
-        write!(mmu.video, addr - 0x8000, val)
+        write!(mmu.ppu, addr - 0x8000, val)
     elseif 0xa000 <= addr < 0xc000
         write!(mmu.cart, addr - 0xa000, val)
     elseif 0xc000 <= addr < 0xe000
@@ -2084,15 +1786,15 @@ function doframe!(gb::Emulator)::Matrix{UInt32}
         handleInterrupts(gb, gb.cpu)
         cpu_step(gb, gb.cpu)
 
-        if gb.video.newframe
-            gb.video.newframe = false
+        if gb.ppu.newframe
+            gb.ppu.newframe = false
             for y in 1:144
                 for x in 1:160
-                    pixel = gb.video.buffer[x,y]
-                    gb.video.frame[y, x] = palette[(pixel & 0x03 + 0x01)]
+                    pixel = gb.ppu.buffer[x,y]
+                    gb.ppu.frame[y, x] = palette[(pixel & 0x03 + 0x01)]
                 end
             end            
-            return gb.video.frame
+            return gb.ppu.frame
         end
     end
 end

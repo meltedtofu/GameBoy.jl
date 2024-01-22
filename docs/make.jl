@@ -34,7 +34,16 @@ readmeifchanged()
 
 makedocs(sitename = "GameBoy.jl",
          format = Documenter.HTML(repolink="github.com/meltedtofu/GameBoy.jl.git", edit_link=nothing),
-         modules = [GameBoy, GameBoy.Processor, GameBoy.Carts, GameBoy.Component, GameBoy.DirectMemoryAccess, GameBoy.RandomAccessMemory],
+         modules = [GameBoy, 
+                    GameBoy.Processor, 
+                    GameBoy.Carts, 
+                    GameBoy.Component, 
+                    GameBoy.DirectMemoryAccess, 
+                    GameBoy.RandomAccessMemory, 
+                    GameBoy.Video,
+                    GameBoy.Interrupts,
+                    GameBoy.IO,
+                    ],
          remotes = nothing,
          pages = [
              "Overview" => "index.md",
