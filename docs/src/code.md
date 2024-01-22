@@ -11,5 +11,7 @@ Modules = [GameBoy,
            GameBoy.Video,
            GameBoy.Interrupts,
            GameBoy.IO,
+           GameBoy.Clock_,
+           GameBoy.MemoryMappingUnit,
           ]
 ```

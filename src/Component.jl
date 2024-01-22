@@ -6,6 +6,8 @@ readb()::UInt8 = 0x00
 
 write!()::Nothing = nothing
 
-export reset!, readb, write!
+step!()::Nothing = nothing
+
+export reset!, readb, step!, write!
 
 end # module Component
