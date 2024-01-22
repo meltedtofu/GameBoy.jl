@@ -64,10 +64,11 @@ end
 
 mutable struct Sprite
     x::UInt8
-    pixels::OffsetVector{UInt8, Vector{UInt8}} # 2 bytes
+    pixel0::UInt8
+    pixel1::UInt8
     attrs::UInt8
     
-    Sprite() = new(0, OffsetVector(zeros(UInt8, 2), OffsetArrays.Origin(0)), 0)
+    Sprite() = new(0, 0, 0, 0)
 end
 
 """
@@ -95,7 +96,7 @@ mutable struct Video
                   Matrix{UInt8}(undef, 160, 144),
                   Matrix{UInt32}(undef, 144, 160),
                   false,
-                  OffsetVector(fill(Sprite(), 10), OffsetArrays.Origin(0)),
+                  OffsetVector([Sprite() for _ in 1:10], OffsetArrays.Origin(0)),
                   0,
                   0,
                  )
@@ -351,12 +352,15 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
         ypos = readb(gb.mmu.oam, i)
         xpos = readb(gb.mmu.oam, i+0x01)
         if 0 < ypos < 160 && xpos < 168 # on screen
-            if ypos <= scanline + 16 < ypos + spriteHeight # in scanline
+            if ypos <= scanline + 0x10 < ypos + spriteHeight # in scanline
                 # insert the sprite into the list, keeping the list in priority order
                 inspos = nsprites
                 while inspos > 0 && gb.video.scanline_sprites[inspos - 1].x > xpos
                     if inspos < 10
-                        gb.video.scanline_sprites[inspos] = gb.video.scanline_sprites[inspos - 1]
+                        gb.video.scanline_sprites[inspos].x      = gb.video.scanline_sprites[inspos - 1].x
+                        gb.video.scanline_sprites[inspos].pixel0 = gb.video.scanline_sprites[inspos - 1].pixel0
+                        gb.video.scanline_sprites[inspos].pixel1 = gb.video.scanline_sprites[inspos - 1].pixel1
+                        gb.video.scanline_sprites[inspos].attrs  = gb.video.scanline_sprites[inspos - 1].attrs
                     end
                     inspos -= 1
                 end
@@ -367,7 +371,7 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
                         tile &= 0xfe
                     end
                     
-                    tiley = scanline + 0x0016 - ypos
+                    tiley = scanline + 0x0010 - ypos
                     if attr & 0x40 > 0 # y flip
                         tiley = (spriteHeight - 0x0001) - tiley
                     end
@@ -375,8 +379,8 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
                     tileaddr = video_tileLineAddress(tile, tiley, true)
                     
                     gb.video.scanline_sprites[inspos].x = xpos;
-                    gb.video.scanline_sprites[inspos].pixels[0] = readb(gb.video, tileaddr)
-                    gb.video.scanline_sprites[inspos].pixels[1] = readb(gb.video, tileaddr + 0x01)
+                    gb.video.scanline_sprites[inspos].pixel0 = readb(gb.video, tileaddr)
+                    gb.video.scanline_sprites[inspos].pixel1 = readb(gb.video, tileaddr + 0x01)
                     gb.video.scanline_sprites[inspos].attrs = attr
                     
                     if nsprites < 10
@@ -394,7 +398,7 @@ function video_readSprites!(gb::Emulator, scanline::UInt8)::Nothing
 end
 
 function video_linePixel(l1::UInt8, l2::UInt8, x::UInt16)::UInt8
-    (((l1 << x) & 0x80) >> 7) | (((l2 << x) & 0x80) >> 6)
+    (((UInt16(l1) << x) & 0x0080) >> 7) | (((UInt16(l2) << x) & 0x0080) >> 6)
 end
 
 function video_mapPixel(gb::Emulator, hiMap::Bool, loTiles::Bool, x::UInt16, y::UInt16)::UInt8
@@ -430,7 +434,7 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
         if winEnable && x + 0x07 >= wx
             bgPixel = video_mapPixel(gb, hiMapWin, loTiles, UInt16(x+0x07-wx), UInt16(scanline-wy))
         elseif bgEnable
-            bgPixel = video_mapPixel(gb, hiMapBg, loTiles, (x+scx)%0x0100, (scanline+scy)%0x0100)
+            bgPixel = video_mapPixel(gb, hiMapBg, loTiles, (UInt16(x)+scx)%0x0100, (UInt16(scanline)+scy)%0x0100)
         end
 
         finalColor = video_paletteLookup(bgPixel, readb(gb.mmu.io, IOBackgroundPalette))
@@ -441,10 +445,10 @@ function video_drawPixel!(gb::Emulator, scanline::UInt8, x::UInt8)::Nothing
             n = 0
             while n < gb.video.num_sprites
                 spriten = gb.video.scanline_sprites[n]
-                if x < spriten.x <= x+0x08
+                if spriten.x <= x + 0x08 < spriten.x + 0x08
                     tileX = x + 0x08 - spriten.x
                     mirrored = spriten.attrs & 0x20 > 0
-                    pixel = video_linePixel(spriten.pixels[0], spriten.pixels[1], UInt16(mirrored ? 0x07 - tileX : tileX))
+                    pixel = video_linePixel(spriten.pixel0, spriten.pixel1, UInt16(mirrored ? 0x07 - tileX : tileX))
                     
                     if pixel > 0
                         hasPriority = spriten.attrs & 0x80 == 0
