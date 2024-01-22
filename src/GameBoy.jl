@@ -99,7 +99,7 @@ function step!(dma::DMA, mmu::Mmu)::Nothing
     
     if dma.source > 0 && (dma.source&0xff) < 0xa0
         dma.active = true
-        write!(mmu.oam, dma.source & 0xff, mmu_readDirect(mmu, dma.source))
+        write!(mmu.oam, dma.source & 0xff, readb(mmu, dma.source))
         dma.source += 1
     else
         dma.active = false
@@ -319,7 +319,7 @@ function clock_updateTimerControl!(clock::Clock, mmu::Mmu, val::UInt8)::Nothing
     nothing
 end
 
-function mmu_readDirect(mmu::Mmu, addr::UInt16)::UInt8
+function Component.readb(mmu::Mmu, addr::UInt16)::UInt8
     if 0x0000 <= addr < 0x0100 && mmu.bootRomEnabled
         readb(bootrom, addr)
     elseif 0x0000 <= addr < 0x8000
@@ -345,17 +345,17 @@ function mmu_readDirect(mmu::Mmu, addr::UInt16)::UInt8
     end
 end
 
-function mmu_read!(gb::Emulator, addr::UInt16)::UInt8
+function Component.readb(gb::Emulator, addr::UInt16)::UInt8
     clock_increment(gb)
 
     if gb.dma.active && addr < 0xff80
         0xff
     else
-        mmu_readDirect(gb.mmu, addr)
+        readb(gb.mmu, addr)
     end
 end
 
-function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
+function Component.write!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     if addr > 0xffff
     elseif 0x0000 <= addr < 0x2000
     # TODO: Cart RAM Bank Enabled
@@ -414,13 +414,13 @@ function mmu_writeDirect!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     nothing
 end
 
-function mmu_write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
+function Component.write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
     clock_increment(gb)
 
     if gb.dma.active && addr < 0xff00
         nothing
     else
-        mmu_writeDirect!(gb.mmu, addr, val)
+        write!(gb.mmu, addr, val)
     end
 end
 
@@ -495,8 +495,8 @@ ZNHC!(cpu::Cpu, z::Bool, n::Bool, h::Bool, c::Bool)::Nothing = begin
 end
 
 function Push16!(gb::Emulator, cpu::Cpu, val::UInt16)::Nothing
-    mmu_write!(gb, cpu.SP - 0x0001, UInt8(val >> 8))
-    mmu_write!(gb, cpu.SP - 0x0002, UInt8(val&0xff))
+    write!(gb, cpu.SP - 0x0001, UInt8(val >> 8))
+    write!(gb, cpu.SP - 0x0002, UInt8(val&0xff))
 
     cpu.SP -= 0x0002
 
@@ -509,8 +509,8 @@ function Pop16!(gb::Emulator, cpu::Cpu)::UInt16
     lowbyteaddr = cpu.SP - 0x0002
     highbyteaddr = cpu.SP - 0x0001
 
-    val = UInt16(mmu_read!(gb, lowbyteaddr))
-    val |= UInt16(mmu_read!(gb, highbyteaddr)) << 8
+    val = UInt16(readb(gb, lowbyteaddr))
+    val |= UInt16(readb(gb, highbyteaddr)) << 8
     val
 end
 
@@ -707,7 +707,7 @@ function rn(gb::Emulator, cpu::Cpu, n::UInt8)::UInt8
         cpu.L
     elseif n == 6
         addr = HL(cpu)
-        mmu_read!(gb, addr)
+        readb(gb, addr)
     elseif n == 7
         cpu.A
     else
@@ -730,7 +730,7 @@ function rn!(gb::Emulator, cpu::Cpu, n::UInt8, v::UInt8)::Nothing
         cpu.L = v
     elseif n == 6
         addr = HL(cpu)
-        mmu_write!(gb, addr, v)
+        write!(gb, addr, v)
     elseif n == 7
         cpu.A = v
     end
@@ -765,7 +765,7 @@ end
 
 function imm8(gb::Emulator, cpu::Cpu)::UInt8
     cpu.PC += 0x0001
-    mmu_read!(gb, cpu.PC - 0x0001)
+    readb(gb, cpu.PC - 0x0001)
 end
 
 function imm8i(gb::Emulator, cpu::Cpu)::Int8
@@ -908,7 +908,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         BC!(cpu, val)
     elseif opcode == 0x02
         addr = BC(cpu)
-        mmu_write!(gb, addr, cpu.A)
+        write!(gb, addr, cpu.A)
     elseif opcode == 0x03
         clock_increment(gb)
         BC!(cpu, BC(cpu) + 0x01)
@@ -927,8 +927,8 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         val₁ = UInt8(cpu.SP & 0xff)
         val₂ = UInt8(cpu.SP >> 8)
 
-        mmu_write!(gb, addr, val₁)
-        mmu_write!(gb, addr+0x01, val₂)
+        write!(gb, addr, val₁)
+        write!(gb, addr+0x01, val₂)
 
     elseif opcode == 0x09
         clock_increment(gb)
@@ -936,7 +936,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), BC(cpu)))
     elseif opcode == 0x0a
         addr = BC(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
     elseif opcode == 0x0b
@@ -960,7 +960,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         DE!(cpu, val)
     elseif opcode == 0x12
         addr = DE(cpu)
-        mmu_write!(gb, addr, cpu.A)
+        write!(gb, addr, cpu.A)
 
     elseif opcode == 0x13
         clock_increment(gb)
@@ -986,7 +986,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), DE(cpu)))
     elseif opcode == 0x1a
         addr = DE(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
     elseif opcode == 0x1b
@@ -1015,7 +1015,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0x22
         addr = HL(cpu)
         val = cpu.A
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
         val = HL(cpu) + 0x01
         HL!(cpu, val)
@@ -1044,7 +1044,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), HL(cpu)))
     elseif opcode == 0x2a
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
         HL!(cpu, HL(cpu)+0x01)
@@ -1075,7 +1075,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0x32
         addr = HL(cpu)
         val = cpu.A
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
         HL!(cpu, HL(cpu)-0x01)
     elseif opcode == 0x33
@@ -1084,25 +1084,25 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.SP += 0x01
     elseif opcode == 0x34
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         res = Inc8!(cpu, val)
 
-        mmu_write!(gb, addr, res)
+        write!(gb, addr, res)
 
     elseif opcode == 0x35
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         res = Dec8!(cpu, val)
 
-        mmu_write!(gb, addr, res)
+        write!(gb, addr, res)
 
     elseif opcode == 0x36
         addr = HL(cpu)
         val = imm8(gb, cpu)
 
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x37
         N!(cpu, false)
@@ -1120,7 +1120,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         HL!(cpu, Add16!(cpu, HL(cpu), cpu.SP))
     elseif opcode == 0x3a
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
         HL!(cpu, HL(cpu) - 0x01)
@@ -1154,7 +1154,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.B = cpu.L
     elseif opcode == 0x46
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.B = val
     elseif opcode == 0x47
@@ -1173,7 +1173,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.C = cpu.L
     elseif opcode == 0x4e
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.C = val
     elseif opcode == 0x4f
@@ -1192,7 +1192,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.D = cpu.L
     elseif opcode == 0x56
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.D = val
     elseif opcode == 0x57
@@ -1211,7 +1211,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.E = cpu.L
     elseif opcode == 0x5e
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.E = val
     elseif opcode == 0x5f
@@ -1230,7 +1230,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.H = cpu.L
     elseif opcode == 0x66
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.H = val
     elseif opcode == 0x67
@@ -1249,7 +1249,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.L = cpu.L
     elseif opcode == 0x6e
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.L = val
     elseif opcode == 0x6f
@@ -1257,32 +1257,32 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0x70
         addr = HL(cpu)
         val = cpu.B
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x71
         addr = HL(cpu)
         val = cpu.C
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x72
         addr = HL(cpu)
         val = cpu.D
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x73
         addr = HL(cpu)
         val = cpu.E
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x74
         addr = HL(cpu)
         val = cpu.H
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x75
         addr = HL(cpu)
         val = cpu.L
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x76
         cpu.Halted = true
@@ -1292,7 +1292,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0x77
         addr = HL(cpu)
         val = cpu.A
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0x78
         cpu.A = cpu.B
@@ -1308,7 +1308,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = cpu.L
     elseif opcode == 0x7e
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
     elseif opcode == 0x7f
@@ -1327,7 +1327,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Add8!(cpu, cpu.A, cpu.L, false)
     elseif opcode == 0x86
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = Add8!(cpu, cpu.A, val, false)
     elseif opcode == 0x87
@@ -1346,7 +1346,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Add8!(cpu, cpu.A, cpu.L, C(cpu))
     elseif opcode == 0x8e
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = Add8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0x8f
@@ -1365,7 +1365,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Sub8!(cpu, cpu.A, cpu.L, false)
     elseif opcode == 0x96
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = Sub8!(cpu, cpu.A, val, false)
     elseif opcode == 0x97
@@ -1384,7 +1384,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         cpu.A = Sub8!(cpu, cpu.A, cpu.L, C(cpu))
     elseif opcode == 0x9e
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = Sub8!(cpu, cpu.A, val, C(cpu))
     elseif opcode == 0x9f
@@ -1403,7 +1403,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         And!(cpu, cpu.L)
     elseif opcode == 0xa6
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         And!(cpu, val)
     elseif opcode == 0xa7
@@ -1422,7 +1422,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         Xor!(cpu, cpu.L)
     elseif opcode == 0xae
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         Xor!(cpu, val)
     elseif opcode == 0xaf
@@ -1441,7 +1441,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         Or!(cpu, cpu.L)
     elseif opcode == 0xb6
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         Or!(cpu, val)
     elseif opcode == 0xb7
@@ -1460,7 +1460,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         Cp!(cpu, cpu.A, cpu.L)
     elseif opcode == 0xbe
         addr = HL(cpu)
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         Cp!(cpu, cpu.A, val)
     elseif opcode == 0xbf
@@ -1617,7 +1617,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         addr = 0xff00 + offset
         val = cpu.A
 
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0xe1
         val = Pop16!(gb, cpu)
@@ -1626,7 +1626,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xe2
         addr = 0xff00 + cpu.C
         val = cpu.A
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0xe5
         clock_increment(gb)
@@ -1660,7 +1660,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         addr = imm16(gb, cpu)
         val = cpu.A
 
-        mmu_write!(gb, addr, val)
+        write!(gb, addr, val)
 
     elseif opcode == 0xee
         addr = HL(cpu)
@@ -1673,7 +1673,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         offset = imm8(gb, cpu)
         addr = 0xff00 + offset
 
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
     elseif opcode == 0xf1
@@ -1682,7 +1682,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
         AF!(cpu, val)
     elseif opcode == 0xf2
         addr = 0xff00 + cpu.C
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
     elseif opcode == 0xf3
@@ -1721,7 +1721,7 @@ function cpu_step(gb::Emulator, cpu::Cpu)
     elseif opcode == 0xfa
         addr = imm16(gb, cpu)
 
-        val = mmu_read!(gb, addr)
+        val = readb(gb, addr)
 
         cpu.A = val
     elseif opcode == 0xfb
@@ -1819,7 +1819,7 @@ end
 Read an arbitrary byte of memory
 """
 function read(gb::Emulator, addr::UInt16)::UInt8
-    mmu_readDirect(gb.mmu, addr)
+    readb(gb.mmu, addr)
 end
 
 export Emulator, free!, loadrom!, reset!, doframe!, buttonstate!, read, ram, ram!
