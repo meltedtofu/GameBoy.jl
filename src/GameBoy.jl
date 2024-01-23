@@ -4,9 +4,6 @@ using OffsetArrays
 include("Component.jl")
 using .Component
 
-include("Processor.jl")
-using .Processor
-
 include("RandomAccessMemory.jl")
 using .RandomAccessMemory
 
@@ -31,32 +28,17 @@ using .Clock_
 include("MemoryMappingUnit.jl")
 using .MemoryMappingUnit
 
+
+include("Processor.jl")
+using .Processor
+
+
 Component.readb(ram::Ram, addr::IORegisters)::UInt8 = readb(ram, UInt16(addr))
 Component.write!(ram::Ram, addr::IORegisters, v::UInt8)::Nothing = write!(ram, UInt16(addr), v)
 
 macro exportinstances(enum)
     eval = GlobalRef(Core, :eval)
     return :($eval($__module__, Expr(:export, map(Symbol, instances($enum))...)))
-end
-
-function Component.step!(dma::DMA, mmu::Mmu)::Nothing
-    if dma.pendingsource > 0
-        if !dma.delaystart
-            dma.source = UInt16(dma.pendingsource) << 8
-            dma.pendingsource = 0   
-        end
-        dma.delaystart = false
-    end
-    
-    if dma.source > 0 && (dma.source&0xff) < 0xa0
-        dma.active = true
-        write!(mmu.oam, dma.source & 0xff, readb(mmu, dma.source))
-        dma.source += 1
-    else
-        dma.active = false
-    end
-    
-    nothing
 end
 
 """
@@ -75,11 +57,13 @@ mutable struct Emulator
         dma = DMA()
         clock = Clock{Mmu}()
         ppu = PPU{Mmu}()
+        cpu = Cpu()
         mmu = Mmu(Cartridge(cartpath; skipChecksum=true), clock, dma, ppu)
         clock.mmu = Ref(mmu)
         ppu.mmu = Ref(mmu)
+        cpu.mmu = Ref(mmu)
 
-        new(Cpu(),
+        new(cpu,
             mmu,
             dma,
             clock,
@@ -89,10 +73,6 @@ mutable struct Emulator
            )
     end
 end
-
-Base.:+(a::UInt16, b::IORegisters)::UInt16 = a + UInt16(b)
-Base.to_index(reg::IORegisters) = Int(reg)
-Base.:|(a::UInt8, b::Interrupt)::UInt8 = a | UInt8(b)
     
 """
 All of the buttons that can be pressed
@@ -189,7 +169,7 @@ function cycle!(gb::Emulator)::Nothing
     
     # Video runs at 1 pixel per clock (4 per machine cycle)
     for _ ∈ 1:4
-        update!(gb.ppu)
+        step!(gb.ppu)
     end
 end
 
@@ -201,65 +181,6 @@ function Component.readb(gb::Emulator, addr::UInt16)::UInt8
     else
         readb(gb.mmu, addr)
     end
-end
-
-function Component.write!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
-    if addr > 0xffff
-    elseif 0x0000 <= addr < 0x2000
-    # TODO: Cart RAM Bank Enabled
-    elseif 0x2000 <= addr < 0x6000
-        write!(mmu.cart, addr, val)
-    elseif 0x6000 <= addr < 0x8000
-        # RTC. Not implemented.
-    elseif 0x8000 <= addr < 0xa000
-        # TODO: Writes to VRAM should be ignored when the LCD is being redrawn
-        write!(mmu.ppu, addr - 0x8000, val)
-    elseif 0xa000 <= addr < 0xc000
-        write!(mmu.cart, addr - 0xa000, val)
-    elseif 0xc000 <= addr < 0xe000
-        write!(mmu.workram, addr - 0xc000, val)
-    elseif 0xe000 <= addr < 0xfe00
-        write!(mmu.workram, addr - 0xe000, val)
-    elseif 0xfe00 <= addr < 0xfea0
-        write!(mmu.oam, addr - 0xfe00, val)
-    elseif 0xfea0 <= addr < 0xff00
-        nothing
-    elseif 0xff00 + IODivider == addr
-        div!(mmu.clock[])
-    elseif 0xff00 + IOTimerCounter == addr
-        if !mmu.clock[].loading
-            write!(mmu.io, IOTimerCounter, val)
-            mmu.clock[].overflow = false
-        end
-    elseif 0xff00 + IOTimerModulo == addr
-        write!(mmu.io, IOTimerModulo, val)
-        if mmu.clock[].loading
-            # While loading writes are immediate
-            write!(mmu.io, IOTimerCounter, val)
-        end
-    elseif 0xff00 + IOTimerControl == addr
-        tac!(mmu.clock[], val)
-    elseif 0xff00 + IOInterruptFlag == addr
-        write!(mmu.io, IOInterruptFlag, val | 0xe0)
-    elseif 0xff00 + IOLCDStat == addr
-        write!(mmu.io, IOLCDStat, (readb(mmu.io, IOLCDStat) & 0x03) | (val & ~0x03))
-    elseif 0xff00 + IOLCDY == addr
-        write!(mmu.io, IOLCDY, 0x00)
-    elseif 0xff00 + IOOAMDMA == addr
-        if val <= 0xf1
-            mmu.dma[].pendingsource = val
-            mmu.dma[].delaystart = true
-        end
-    elseif 0xff00 + IOBootRomDisable == addr
-        mmu.bootRomEnabled = false
-    elseif 0xff00 <= addr < 0xff80 # Generic IO for unimplemented devices.
-        write!(mmu.io, addr - 0xff00, val)
-    elseif 0xff80 <= addr < 0xffff
-        write!(mmu.highram, addr - 0xff80, val)
-    elseif 0xffff == addr
-        mmu.interrupt_enable = val
-    end
-    nothing
 end
 
 function Component.write!(gb::Emulator, addr::UInt16, val::UInt8)::Nothing
@@ -1670,6 +1591,6 @@ function read(gb::Emulator, addr::UInt16)::UInt8
     readb(gb.mmu, addr)
 end
 
-export Emulator, free!, loadrom!, reset!, doframe!, buttonstate!, read, ram, ram!
+export Emulator, reset!, doframe!, buttonstate!, read, ram, ram!
 
 end # module GameBoy

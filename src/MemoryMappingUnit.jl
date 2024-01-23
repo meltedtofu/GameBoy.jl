@@ -6,6 +6,8 @@ using ..Clock_
 using ..DirectMemoryAccess
 using ..Video
 using ..Carts
+using ..IO
+using ..Interrupts
 
 """
 Memory Mapping Unit
@@ -70,6 +72,85 @@ function Component.readb(mmu::Mmu, addr::UInt16)::UInt8
     end
 end
 
+
+function Component.write!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
+    if addr > 0xffff
+    elseif 0x0000 <= addr < 0x2000
+    # TODO: Cart RAM Bank Enabled
+    elseif 0x2000 <= addr < 0x6000
+        write!(mmu.cart, addr, val)
+    elseif 0x6000 <= addr < 0x8000
+        # RTC. Not implemented.
+    elseif 0x8000 <= addr < 0xa000
+        # TODO: Writes to VRAM should be ignored when the LCD is being redrawn
+        write!(mmu.ppu, addr - 0x8000, val)
+    elseif 0xa000 <= addr < 0xc000
+        write!(mmu.cart, addr - 0xa000, val)
+    elseif 0xc000 <= addr < 0xe000
+        write!(mmu.workram, addr - 0xc000, val)
+    elseif 0xe000 <= addr < 0xfe00
+        write!(mmu.workram, addr - 0xe000, val)
+    elseif 0xfe00 <= addr < 0xfea0
+        write!(mmu.oam, addr - 0xfe00, val)
+    elseif 0xfea0 <= addr < 0xff00
+        nothing
+    elseif 0xff00 + IODivider == addr
+        div!(mmu.clock[])
+    elseif 0xff00 + IOTimerCounter == addr
+        if !mmu.clock[].loading
+            write!(mmu.io, IOTimerCounter, val)
+            mmu.clock[].overflow = false
+        end
+    elseif 0xff00 + IOTimerModulo == addr
+        write!(mmu.io, IOTimerModulo, val)
+        if mmu.clock[].loading
+            # While loading writes are immediate
+            write!(mmu.io, IOTimerCounter, val)
+        end
+    elseif 0xff00 + IOTimerControl == addr
+        tac!(mmu.clock[], val)
+    elseif 0xff00 + IOInterruptFlag == addr
+        write!(mmu.io, IOInterruptFlag, val | 0xe0)
+    elseif 0xff00 + IOLCDStat == addr
+        write!(mmu.io, IOLCDStat, (readb(mmu.io, IOLCDStat) & 0x03) | (val & ~0x03))
+    elseif 0xff00 + IOLCDY == addr
+        write!(mmu.io, IOLCDY, 0x00)
+    elseif 0xff00 + IOOAMDMA == addr
+        if val <= 0xf1
+            mmu.dma[].pendingsource = val
+            mmu.dma[].delaystart = true
+        end
+    elseif 0xff00 + IOBootRomDisable == addr
+        mmu.bootRomEnabled = false
+    elseif 0xff00 <= addr < 0xff80 # Generic IO for unimplemented devices.
+        write!(mmu.io, addr - 0xff00, val)
+    elseif 0xff80 <= addr < 0xffff
+        write!(mmu.highram, addr - 0xff80, val)
+    elseif 0xffff == addr
+        mmu.interrupt_enable = val
+    end
+    nothing
+end
+
+function Component.step!(dma::DMA, mmu::Mmu)::Nothing
+    if dma.pendingsource > 0
+        if !dma.delaystart
+            dma.source = UInt16(dma.pendingsource) << 8
+            dma.pendingsource = 0   
+        end
+        dma.delaystart = false
+    end
+    
+    if dma.source > 0 && (dma.source&0xff) < 0xa0
+        dma.active = true
+        write!(mmu.oam, dma.source & 0xff, readb(mmu, dma.source))
+        dma.source += 1
+    else
+        dma.active = false
+    end
+    
+    nothing
+end
 
 const bootrom = Ram([
     0x31,0xFE,0xFF,0xAF,0x21,0xFF,0x9F,0x32,0xCB,0x7C,0x20,0xFB,0x21,0x26,0xFF,0x0E,

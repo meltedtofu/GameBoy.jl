@@ -21,4 +21,6 @@ end
 
 @exportinstances Interrupt
 
+Base.:|(a::UInt8, b::Interrupt)::UInt8 = a | UInt8(b)
+
 end # module Interrupts

@@ -29,6 +29,9 @@ Intentionally skipping sound since it is unimplemented in this emulator
     IOBootRomDisable=0x50
 end
 
+Base.:+(a::UInt16, b::IORegisters)::UInt16 = a + UInt16(b)
+Base.to_index(reg::IORegisters) = Int(reg)
+
 macro exportinstances(enum)
     eval = GlobalRef(Core, :eval)
     return :($eval($__module__, Expr(:export, map(Symbol, instances($enum))...)))

@@ -1,5 +1,7 @@
 module Processor
 
+using ..MemoryMappingUnit
+
 """
 Main processor
 """
@@ -19,6 +21,7 @@ mutable struct Cpu
     Halted::Bool
     HaltBug::Bool
     MoonEyeComplete::Bool
+    mmu::Base.RefValue{Mmu}
 
     function Cpu(bootRom::Bool=false)
         # See "The Cycle Accurate GB Doc"
@@ -37,7 +40,8 @@ mutable struct Cpu
             false,
             false,
             false,
-            false
+            false,
+            Ref{Mmu}(),
            )
     end
 end

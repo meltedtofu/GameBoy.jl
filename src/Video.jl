@@ -202,7 +202,7 @@ function drawPixel!(ppu::PPU, scanline::UInt8, x::UInt8)::Nothing
     nothing
 end
 
-function update!(ppu::PPU)::Nothing
+function Component.step!(ppu::PPU)::Nothing
     # assert scanline <= 154
     
     scanline = UInt8(ppu.frameprogress ÷ 456)
@@ -276,6 +276,6 @@ function update!(ppu::PPU)::Nothing
     nothing
 end
 
-export PPU, update!
+export PPU
 
 end # module Video
