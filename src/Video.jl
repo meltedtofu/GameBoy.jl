@@ -12,7 +12,7 @@ mutable struct Sprite
     pixel0::UInt8
     pixel1::UInt8
     attrs::UInt8
-    
+
     Sprite() = new(0, 0, 0, 0)
 end
 
@@ -72,13 +72,13 @@ function tileLineAddress(index::UInt8, y::UInt16, lowBank::Bool)::UInt16
     else
         addr = 0x1000 + reinterpret(Int8, index) * 16
     end
-    
+
     addr + 2y
 end
 
 function readSprites!(ppu::PPU, scanline::UInt8)::Nothing
-    spriteHeight = readb(ppu.mmu[].io, IOLCDControl) & 0x04 > 0 ? 16 : 8
-    
+    spriteHeight = readb(ppu.mmu[].io, IOLCDControl) & 0x04 > 0 ? 0x10 : 0x08
+
     nsprites = 0
     i::UInt16 = 0x0000
     while i < 160
@@ -100,15 +100,15 @@ function readSprites!(ppu::PPU, scanline::UInt8)::Nothing
                 if inspos < 10
                     tile = readb(ppu.mmu[].oam, i+0x02)
                     attr = readb(ppu.mmu[].oam, i+0x03)
-                    if spriteHeight == 16
+                    if spriteHeight == 0x10
                         tile &= 0xfe
                     end
-                    
+
                     tiley = scanline + 0x0010 - ypos
                     if attr & 0x40 > 0 # y flip
                         tiley = (spriteHeight - 0x0001) - tiley
                     end
-                    
+
                     tileaddr = tileLineAddress(tile, tiley, true)
 
                     ppu.scanline_sprites[inspos].x = xpos;
@@ -124,7 +124,7 @@ function readSprites!(ppu::PPU, scanline::UInt8)::Nothing
         end
         i += 4
     end
-    
+
     ppu.num_sprites = nsprites
 
     nothing
@@ -146,23 +146,23 @@ end
 
 function drawPixel!(ppu::PPU, scanline::UInt8, x::UInt8)::Nothing
     lcdc = readb(ppu.mmu[].io, IOLCDControl)
-    hiMapBg = lcdc & 0x08 > 0 
+    hiMapBg = lcdc & 0x08 > 0
     hiMapWin = lcdc & 0x40 > 0
     bgEnable = lcdc & 0x01 > 0
     winEnable = lcdc & 0x20 > 0
     spriteEnable = lcdc & 0x02 > 0
     loTiles = lcdc & 0x10 > 0
-    
+
     wy = readb(ppu.mmu[].io, IOWindowY)
     wx = readb(ppu.mmu[].io, IOWindowX)
-    
+
     winEnable = winEnable && wx < 167 && wy < 144 && wy <= scanline
     spriteEnable = spriteEnable && ppu.num_sprites > 0
 
     if winEnable || bgEnable || spriteEnable
         scy = readb(ppu.mmu[].io, IOScrollY)
         scx = readb(ppu.mmu[].io, IOScrollX)
-        
+
         bgPixel = 0x00
         if winEnable && x + 0x07 >= wx
             bgPixel = mapPixel(ppu, hiMapWin, loTiles, UInt16(x+0x07-wx), UInt16(scanline-wy))
@@ -182,7 +182,7 @@ function drawPixel!(ppu::PPU, scanline::UInt8, x::UInt8)::Nothing
                     tileX = x + 0x08 - spriten.x
                     mirrored = spriten.attrs & 0x20 > 0
                     pixel = linePixel(spriten.pixel0, spriten.pixel1, UInt16(mirrored ? 0x07 - tileX : tileX))
-                    
+
                     if pixel > 0
                         hasPriority = spriten.attrs & 0x80 == 0
                         if finalColor == 0 || hasPriority
@@ -204,13 +204,13 @@ end
 
 function Component.step!(ppu::PPU)::Nothing
     # assert scanline <= 154
-    
+
     scanline = UInt8(ppu.frameprogress ÷ 456)
     lcdOn = readb(ppu.mmu[].io, IOLCDControl) & 0x80 > 0x00
     write!(ppu.mmu[].io, IOLCDY, scanline)
 
     stat = readb(ppu.mmu[].io, IOLCDStat)
-    
+
     if lcdOn
         if scanline == readb(ppu.mmu[].io, IOLCDYCompare)
             if (stat & 0x04) == 0x00
@@ -223,9 +223,9 @@ function Component.step!(ppu::PPU)::Nothing
             write!(ppu.mmu[].io, IOLCDStat, readb(ppu.mmu[].io, IOLCDStat) & ~0x04)
         end
     end
-    
+
     lcdMode = stat & 0x03
-    
+
     if scanline >= 144 # last 10 scanlines are vblank. don't draw anything
         if lcdMode != 1
             write!(ppu.mmu[].io, IOLCDStat, (stat & ~0x03) | 0x01)
@@ -237,7 +237,7 @@ function Component.step!(ppu::PPU)::Nothing
         end
     else
         scanlineProgress = ppu.frameprogress % 456
-        
+
         if scanlineProgress < 92
             if lcdMode != 2
                 write!(ppu.mmu[].io, IOLCDStat, (stat & 0x03) | 0x02)
@@ -259,7 +259,7 @@ function Component.step!(ppu::PPU)::Nothing
             if lcdMode != 0
                 if lcdOn
                     while ppu.curx < 160
-                        drawPixel!(ppu, scanline, ppu.curx) 
+                        drawPixel!(ppu, scanline, ppu.curx)
                         ppu.curx += 1
                     end
                 end
@@ -270,9 +270,9 @@ function Component.step!(ppu::PPU)::Nothing
             end
         end
     end
-    
+
     ppu.frameprogress = (ppu.frameprogress + 1) % 70224
-    
+
     nothing
 end
 

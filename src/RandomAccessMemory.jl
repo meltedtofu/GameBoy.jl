@@ -9,7 +9,7 @@ Random Access Memory.
 """
 mutable struct Ram
     bytes::OffsetVector{UInt8, Vector{UInt8}}
-    
+
     Ram(size::UInt16) = Ram(zeros(UInt8, size))
     Ram(data::Vector{UInt8}) = new(OffsetVector(data, OffsetArrays.Origin(0)))
 end
@@ -19,7 +19,7 @@ function Component.reset!(ram::Ram)::Nothing
     nothing
 end
 
-Component.readb(ram::Ref{Ram}, addr::UInt16)::UInt8 = readb(ram[])
+Component.readb(ram::Ref{Ram}, addr::UInt16)::UInt8 = readb(ram[], addr)
 Component.readb(ram::Ram, addr::UInt16)::UInt8 = ram.bytes[addr]
 Component.write!(ram::Ref{Ram}, addr::UInt16, v::UInt8)::Nothing = write!(ram[], addr, v)
 function Component.write!(ram::Ram, addr::UInt16, v::UInt8)::Nothing

@@ -69,6 +69,8 @@ function Component.readb(mmu::Mmu, addr::UInt16)::UInt8
         readb(mmu.highram, addr - 0xff80)
     elseif 0xffff == addr
         mmu.interrupt_enable
+    else
+        0x00
     end
 end
 
@@ -136,11 +138,11 @@ function Component.step!(dma::DMA, mmu::Mmu)::Nothing
     if dma.pendingsource > 0
         if !dma.delaystart
             dma.source = UInt16(dma.pendingsource) << 8
-            dma.pendingsource = 0   
+            dma.pendingsource = 0
         end
         dma.delaystart = false
     end
-    
+
     if dma.source > 0 && (dma.source&0xff) < 0xa0
         dma.active = true
         write!(mmu.oam, dma.source & 0xff, readb(mmu, dma.source))
@@ -148,7 +150,7 @@ function Component.step!(dma::DMA, mmu::Mmu)::Nothing
     else
         dma.active = false
     end
-    
+
     nothing
 end
 

@@ -12,11 +12,11 @@ mutable struct Clock{T}
     overflow::Bool
     loading::Bool
     mmu::Base.RefValue{T}
-    
+
     Clock{T}() where {T} = Clock{T}(nothing)
-    Clock{T}(t::Union{Nothing, T}) where {T} = new(0, 
-                                                   false, 
-                                                   false, 
+    Clock{T}(t::Union{Nothing, T}) where {T} = new(0,
+                                                   false,
+                                                   false,
                                                    isnothing(t) ? Ref{T}() : Ref(t))
 end
 
@@ -30,6 +30,8 @@ function clock_getTimerBit(control::UInt8, cycles::UInt16)::Bool
         cycles & (0x0001 << 5) > 0
     elseif switch == 0x03
         cycles & (0x0001 << 7) > 0
+    else
+        false
     end
 end
 
@@ -64,7 +66,7 @@ function Component.step!(clock::Clock)::Nothing
         write!(clock.mmu[].io, IOTimerCounter, readb(clock.mmu[].io, IOTimerModulo))
         clock.loading = true
     end
-    
+
     clock_countChange!(clock, clock.cycles + 0x04)
 end
 
@@ -72,10 +74,10 @@ end
 function tac!(clock::Clock, val::UInt8)::Nothing
     old = readb(clock.mmu[].io, IOTimerControl)
     write!(clock.mmu[].io, IOTimerControl, val)
-    
+
     oldbit = (old & 0x04) > 0x00 && clock_getTimerBit(old, clock.cycles)
     newbit = (val & 0x04) > 0x00 && clock_getTimerBit(val, clock.cycles)
-    
+
     # check for falling edge
     if oldbit && !newbit
         clock_timerIncrement!(clock)

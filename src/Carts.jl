@@ -10,12 +10,13 @@ function idx(mbc::MemoryBankController, addr::UInt16, romsize::UInt32)::Tuple{In
     if addr < 0x4000
         (addr, -1)
     elseif 0x4000 <= addr  < 0x8000
-		cartaddr = (UInt32(mbc.active_rom_bank) * 0x4000) + (addr - 0x4000)
-
+        cartaddr = (UInt32(mbc.active_rom_bank) * 0x4000) + (addr - 0x4000)
         (cartaddr%romsize, -1)
     elseif 0xa000 <= addr < 0xc000
         reladdr = addr - 0xa000
         (-1, UInt32(mbc.active_ram_bank) * 0x2000 + reladdr)
+    else
+        (-1, -1)
     end
 end
 
@@ -109,7 +110,7 @@ function Component.write!(mbc::MBC5, addr::UInt16, data::UInt8, ram::Ref{OffsetV
         reladdr = addr - 0xa0000
         ram[][mbc.active_ram_bank * 0x2000 + reladdr] = data
     end
-    
+
     nothing
 end
 
@@ -238,7 +239,7 @@ mutable struct Cartridge
         title = [rom[0x0134 + i] for i ∈ 0x00:0x0f] |> Base.Fix1(filter, b -> 0x00 < b < 0x80) |> String
 
         (mbc, features) = detect_cart_type(rom[0x147])
-        
+
         romsize = detect_rom_size(rom[0x148])
 
         ramsize = 0

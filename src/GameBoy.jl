@@ -50,6 +50,7 @@ mutable struct Emulator
     dma::DMA
     clock::Clock{Mmu}
     frameStride::Int
+    cart::Cartridge
     ppu::PPU{Mmu}
     buttons::UInt8
 
@@ -58,7 +59,8 @@ mutable struct Emulator
         clock = Clock{Mmu}()
         ppu = PPU{Mmu}()
         cpu = Cpu()
-        mmu = Mmu(Cartridge(cartpath; skipChecksum=true), clock, dma, ppu)
+        cart = Cartridge(cartpath; skipChecksum=true)
+        mmu = Mmu(cart, clock, dma, ppu)
         clock.mmu = Ref(mmu)
         ppu.mmu = Ref(mmu)
         cpu.mmu = Ref(mmu)
@@ -68,12 +70,13 @@ mutable struct Emulator
             dma,
             clock,
             160 * 4,
+            cart,
             ppu,
             0,
            )
     end
 end
-    
+
 """
 All of the buttons that can be pressed
 """
@@ -140,7 +143,7 @@ function Component.reset!(gb::Emulator)
     reset!(gb.clock)
     reset!(gb.ppu)
     reset!(gb.mmu, enableBootRom)
-    
+
     write!(gb.mmu.io, IOJoypad, 0xcf)
     write!(gb.mmu.io, IOSerialControl, 0x7e)
     write!(gb.mmu.io, IOTimerCounter, 0x00)
@@ -155,18 +158,18 @@ function Component.reset!(gb::Emulator)
     write!(gb.mmu.io, IOObjectPalette1, 0xff)
     write!(gb.mmu.io, IOWindowY, 0x00)
     write!(gb.mmu.io, IOWindowX, 0x00)
-    
+
     gb.cpu = Cpu(enableBootRom)
     Component.reset!(gb.dma)
     gb.buttons = 0
-    
+
     nothing
 end
 
 function cycle!(gb::Emulator)::Nothing
     step!(gb.clock)
     step!(gb.dma, gb.mmu)
-    
+
     # Video runs at 1 pixel per clock (4 per machine cycle)
     for _ ∈ 1:4
         step!(gb.ppu)
@@ -1562,7 +1565,7 @@ function doframe!(gb::Emulator)::Matrix{UInt32}
                     pixel = gb.ppu.buffer[x,y]
                     gb.ppu.frame[y, x] = palette[(pixel & 0x03 + 0x01)]
                 end
-            end            
+            end
             return gb.ppu.frame
         end
     end
@@ -1573,14 +1576,14 @@ Directly set the state of a button.
 """
 function buttonstate!(gb::Emulator, b::Button, pressed::Bool)
     if pressed
-        gb.buttons &= ~b
+        gb.buttons &= ~UInt8(b)
     else
-        if gb.buttons & button == 0
-            gb.buttons |= button
-            write!(gb.mmu.io, IOInterruptFlag, read(gb.mmu.io, IOInterruptFlag) | InterruptJoypad)
+        if gb.buttons & UInt8(b) == 0
+            gb.buttons |= UInt8(b)
+            write!(gb.mmu.io, IOInterruptFlag, readb(gb.mmu.io, IOInterruptFlag) | InterruptJoypad)
         end
     end
-    
+
     nothing
 end
 
