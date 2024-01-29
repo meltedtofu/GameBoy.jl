@@ -5,3 +5,7 @@ version = "0.9.0"
 
 [deps]
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
+
+[compat]
+julia = "1.10"
+OffsetArrays = "1.13"
