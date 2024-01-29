@@ -131,7 +131,7 @@ Restore cartridge RAM.
 Use `ram` to capture the state.
 """
 function ram!(gb::Emulator, data::Vector{UInt8})::Nothing
-    gb.cart.ram = deepcopy(data)
+    gb.cart.ram = OffsetVector(deepcopy(data), OffsetArrays.Origin(0))
     nothing
 end
 
