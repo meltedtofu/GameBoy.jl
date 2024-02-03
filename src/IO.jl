@@ -6,7 +6,7 @@ Addresses of IO devices relative to 0xff00
 Intentionally skipping sound since it is unimplemented in this emulator
 """
 @enum IORegisters begin
-    IOJoypad=0x10
+    IOJoypad=0x00
     IOSerialData=0x01
     IOSerialControl=0x02
     IODivider=0x04

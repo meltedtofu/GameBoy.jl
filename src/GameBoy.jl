@@ -1539,7 +1539,7 @@ function input_update!(mmu::Mmu, buttons::UInt8)::Nothing
     joyReg = readb(mmu.io, IOJoypad)
     if joyReg & 0x20 != 0 # Directional keys
         write!(mmu.io, IOJoypad, (joyReg & 0xf0) | ((invButtons >> 4) & 0x0f))
-    elseif joyReg & 0x10 == 0 # Buttons
+    elseif joyReg & 0x10 != 0 # Buttons
         write!(mmu.io, IOJoypad, (joyReg & 0xf0) | invButtons & 0x0f)
     elseif joyReg == 3 # Model check - 0xfx == classic gameboy
         write!(mmu.io, IOJoypad, 0xff)

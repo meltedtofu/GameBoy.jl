@@ -64,7 +64,7 @@ function Component.readb(mmu::Mmu, addr::UInt16)::UInt8
     elseif 0xfea0 <= addr < 0xff00
         0x00
     elseif 0xff00 <= addr < 0xff80
-        readb(mmu.io, addr - 0xff00)
+        readb(mmu.io, addr - 0xff00) | (addr == 0xff00 ? 0xc0 : 0x00)
     elseif 0xff80 <= addr < 0xffff
         readb(mmu.highram, addr - 0xff80)
     elseif 0xffff == addr
