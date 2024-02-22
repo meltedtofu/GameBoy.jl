@@ -20,10 +20,10 @@ function Component.reset!(ram::Ram)::Nothing
 end
 
 Component.readb(ram::Ref{Ram}, addr::UInt16)::UInt8 = readb(ram[], addr)
-Component.readb(ram::Ram, addr::UInt16)::UInt8 = ram.bytes[addr]
+Component.readb(ram::Ram, addr::UInt16)::UInt8 = @inbounds ram.bytes[addr]
 Component.write!(ram::Ref{Ram}, addr::UInt16, v::UInt8)::Nothing = write!(ram[], addr, v)
 function Component.write!(ram::Ram, addr::UInt16, v::UInt8)::Nothing
-    ram.bytes[addr] = v
+    @inbounds ram.bytes[addr] = v
     nothing
 end
 
