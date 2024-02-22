@@ -1,0 +1,10 @@
+name = "profile"
+uuid = "f45ada27-9889-4d7b-bcb6-55f7d6687030"
+authors = ["Melted Tofu <melted@meltedtofu.com>"]
+version = "0.1.0"
+
+[deps]
+GameBoy = "6fb4242f-1e24-4c34-aea5-7820002b36ca"
+PProf = "e4faabce-9ead-11e9-39d9-4379958e3056"
+Profile = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
+ProfileView = "c46f51b8-102a-5cf2-8d2c-8597cb0e0da7"
