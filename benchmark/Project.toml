@@ -1,0 +1,8 @@
+name = "benchmark"
+uuid = "d7592f7b-6c5a-4be9-be87-c71f89456c61"
+authors = ["Melted Tofu <melted@meltedtofu.com>"]
+version = "0.1.0"
+
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+GameBoy = "6fb4242f-1e24-4c34-aea5-7820002b36ca"
