@@ -77,17 +77,13 @@ end
 
 function Component.write!(mmu::Mmu, addr::UInt16, val::UInt8)::Nothing
     if addr > 0xffff
-    elseif 0x0000 <= addr < 0x2000
-    # TODO: Cart RAM Bank Enabled
-    elseif 0x2000 <= addr < 0x6000
+    elseif 0x0000 <= addr < 0x8000
         write!(mmu.cart, addr, val)
-    elseif 0x6000 <= addr < 0x8000
-        # RTC. Not implemented.
     elseif 0x8000 <= addr < 0xa000
         # TODO: Writes to VRAM should be ignored when the LCD is being redrawn
         write!(mmu.ppu, addr - 0x8000, val)
     elseif 0xa000 <= addr < 0xc000
-        write!(mmu.cart, addr - 0xa000, val)
+        write!(mmu.cart, addr, val)
     elseif 0xc000 <= addr < 0xe000
         write!(mmu.workram, addr - 0xc000, val)
     elseif 0xe000 <= addr < 0xfe00

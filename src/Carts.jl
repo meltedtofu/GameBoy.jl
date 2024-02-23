@@ -6,21 +6,6 @@ using ..Component
 
 @enum MemoryBankController NoMBC MBC1 MBC2 MBC3 MBC5
 
-function idx(mbc::MemoryBankController, active_rom_bank::Int, active_ram_bank::Int, addr::UInt16, romsize::UInt32)::Int
-    if mbc == NoMBC || mbc == MBC2
-        addr
-    elseif addr < 0x4000
-        addr
-    elseif 0x4000 <= addr  < 0x8000
-        cartaddr = (active_rom_bank * 0x4000) + (addr - 0x4000)
-        cartaddr%romsize
-    elseif 0xa000 <= addr < 0xc000
-        active_ram_bank * 0x2000 + addr - 0xa000
-    else
-        0
-    end
-end
-
 struct ExtraFeatureFlags
     battery::Bool
     ram::Bool
@@ -42,8 +27,14 @@ mutable struct Cartridge
     mbc::MemoryBankController
     title::String
     features::ExtraFeatureFlags
-    active_rom_bank::Int
-    active_ram_bank::Int
+    ramg::Bool
+    bank1::UInt8
+    bank2::UInt8
+    mbc1_mode::Bool
+    rom_offset_lower::UInt
+    rom_offset_upper::UInt
+    ram_offset::Int
+    ramb::UInt8
 
     function Cartridge(path::String; skipChecksum::Bool=false)
         cartsize = filesize(path)
@@ -67,13 +58,6 @@ mutable struct Cartridge
 
         (mbc, features) = detect_cart_type(rom[0x147])
 
-        active_rom_bank = 1
-        active_ram_bank = 1
-        if mbc == MBC1
-            active_ram_bank = 0
-        end
-
-
         romsize = detect_rom_size(rom[0x148])
 
         ramsize = 0
@@ -89,59 +73,104 @@ mutable struct Cartridge
             mbc,
             title,
             features,
-            active_rom_bank,
-            active_ram_bank,
+            false,
+            0b0_0001,
+            0b00,
+            false,
+            0,
+            0x4000,
+            0,
+            0,
            )
     end
 end
 
+const ROM_BANK_SIZE = 0x4000
+const RAM_BANK_SIZE = 0x2000
+
+function rom_offsets_mbc1!(cart::Cartridge)::Nothing
+    upperbits = cart.bank2 << 5
+    lowerbits = cart.bank1
+    if cart.mbc1_mode 
+        cart.rom_offset_lower = UInt32(upperbits) * ROM_BANK_SIZE
+    else
+        0b00
+    end
+    cart.rom_offset_upper = UInt32(upperbits | lowerbits) * ROM_BANK_SIZE
+    nothing
+end
+
+function rom_offsets_mbc5!(cart::Cartridge)::Nothing
+    upperbits = UInt32(cart.bank2) << 8
+    lowerbits = UInt32(cart.bank1)
+    cart.rom_offset_lower = 0x0000
+    cart.rom_offset_upper = ROM_BANK_SIZE * (upperbits | lowerbits)
+    nothing
+end
+
+function ram_offset_mbc1!(cart::Cartridge)::Nothing
+    if cart.mbc1_mode
+        cart.ram_offset = cart.bank2 * RAM_BANK_SIZE
+    else
+        cart.ram_offset = 0b00
+    end
+    nothing
+end
+
 function Component.write!(cart::Cartridge, addr::UInt16, data::UInt8)::Nothing
     if cart.mbc == MBC1
-        if 0x2000 <= addr < 0x4000
-            bankno = data & 0x1f
-            if bankno == 0
-                bankno = 1
+        if 0x0000 <= addr < 0x2000
+            cart.ramg = (data & 0b1111) == 0b1010
+        elseif 0x2000 <= addr < 0x4000
+            if (data & 0b1_1111) == 0b0_0000
+                cart.bank1 = 0b0_0001
+            else
+                cart.bank1 = data & 0b1_1111
             end
-            cart.active_rom_bank = (cart.active_rom_bank & 0xe0) | bankno
+            rom_offsets_mbc1!(cart)
         elseif 0x4000 <= addr < 0x6000
-            cart.active_rom_bank = (cart.active_rom_bank & 0x1f) | ((data & 0x03) << 5)
-        elseif 0xa000 <= addr < 0xc000
-            reladdr = addr - 0xa0000
-            cart.ram[UInt16(cart.active_ram_bank) * 0x2000 + reladdr] = data
+            cart.bank2 = data & 0b11
+            rom_offsets_mbc1!(cart)
+            ram_offset_mbc1!(cart)
+        elseif 0x06000 <= addr < 0x8000
+            cart.mbc1_mode = (data & 0b1) == 0b1
+            rom_offsets_mbc1!(cart)
+            ram_offset_mbc1!(cart)
+        elseif 0xa000 <= addr < 0xc000 && cart.ramg
+            cart.ram[(cart.ram_offset | addr & 0x1fff) & (length(cart.ram) - 1)] = data
         end
     elseif cart.mbc == MBC2
-        if 0x2000 <= addr < 0x4000
-            bankno = data & 0x0f
-            if bankno == 0
-                bankno = 1
+        if 0x0000 <= addr < 0x4000
+            cart.ramg = (data & 0x0f) == 0x0a
+            if data & 0b1111 == 0b0000
+                cart.bank1 = 0b0001
+            else
+                cart.bank1 = data & 0b1111
             end
-            cart.active_rom_bank = (cart.active_rom_bank & 0xe0) | bankno
+            cart.rom_offset_lower = 0x0000
+            cart.rom_offset_upper = ROM_BANK_SIZE * UInt32(cart.bank1)
+        elseif 0xa000 <= addr < 0xc000 && cart.ramg && length(cart.ram) > 0
+            cart.ram[(cart.ram_offset | addr & 0x1fff) & (length(cart.ram) - 1)] = data & 0x0f
         end
     elseif cart.mbc == MBC3
         if 0x2000 <= addr < 0x4000
-            bankno = data & 0x7f
-            if bankno == 0
-                bankno = 1
-            end
-            cart.active_rom_bank = bankno
         elseif 0x4000 <= addr < 0x6000
-            cart.active_ram_bank = data
         elseif 0xa000 <= addr < 0xc000
-            reladdr = addr - 0xa0000
-            cart.ram[cart.active_ram_bank * 0x2000 + reladdr] = data
         end
     elseif cart.mbc == MBC5
-        old = cart.active_rom_bank
-
-        if 0x2000 <= addr < 0x3000
-            cart.active_rom_bank = (cart.active_rom_bank & 0xff00) | UInt16(data)
+        if 0x0000 <= addr < 0x2000
+            cart.ramg = data == 0x0a
+        elseif 0x2000 <= addr < 0x3000
+            cart.bank1 = data
+            rom_offsets_mbc5!(cart)
         elseif 0x3000 <= addr < 0x4000
-            cart.active_rom_bank = (cart.active_rom_bank & 0x00ff) | ((UInt16(data) & 0x0001) << 9)
+            cart.bank2 = data & 0b1
+            rom_offsets_mbc5!(cart)
         elseif 0x4000 <= addr < 0x6000
-            cart.active_ram_bank = data & 0x0f
-        elseif 0xa000 <= addr < 0xc000
-            reladdr = addr - 0xa0000
-            cart.ram[cart.active_ram_bank * 0x2000 + reladdr] = data
+            cart.ramb = data & 0b1111
+            cart.ram_offset = RAM_BANK_SIZE * UInt32(cart.ramb)
+        elseif 0xa000 <= addr < 0xc000 && cart.ramg
+            cart.ram[(cart.ram_offset | addr & 0x1fff) & (length(cart.ram) - 1)] = data
         end
     end
 
@@ -225,16 +254,46 @@ function detect_rom_size(b::UInt8)::UInt32
 		1048576
 	elseif b == 0x06
 		2097152
+    elseif b == 0x07
+        4194304
+    elseif b == 0x08
+        8388608
+    elseif b == 0x09
+        16777216
 	else
 		32768
 	end
 end
 
 function Component.readb(c::Cartridge, addr::UInt16)::UInt8
-    if 0xa000 <= addr < 0xc000
-        @inbounds c.ram[idx(c.mbc, c.active_rom_bank, c.active_ram_bank, addr, c.romsize)]
+    if 0x0000 <= addr < 0x4000
+        @inbounds c.rom[(c.rom_offset_lower | addr & 0x3fff) & (length(c.rom) - 1)]
+    elseif 0x4000 <= addr < 0x8000
+        @inbounds c.rom[(c.rom_offset_upper | addr & 0x3fff) & (length(c.rom) - 1)]
+    elseif 0xa000 <= addr < 0xc000
+        if c.mbc == MBC1
+            if length(c.ram) > 0 && c.ramg
+                @inbounds c.ram[(c.ram_offset | addr & 0x1fff) & (length(c.ram) - 1)]
+            else
+                0xff
+            end
+        elseif c.mbc == MBC2
+            if length(c.ram) > 0 && c.ramg
+                @inbounds c.ram[(c.ram_offset | addr & 0x1fff) & (length(c.ram) - 1)]
+            else
+                0xff
+            end
+        elseif c.mbc == MBC5
+            if length(c.ram) > 0 && c.ramg
+                @inbounds c.ram[(c.ram_offset | addr & 0x1fff) & (length(c.ram) - 1)]
+            else
+                0xff
+            end
+        else
+            0xff
+        end
     else
-        @inbounds c.rom[idx(c.mbc, c.active_rom_bank, c.active_ram_bank, addr, c.romsize)]
+        0xff
     end
 end
 
