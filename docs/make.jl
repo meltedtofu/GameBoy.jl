@@ -33,7 +33,7 @@ end
 readmeifchanged()
 
 makedocs(sitename = "GameBoy.jl",
-         format = Documenter.HTML(repolink="github.com/meltedtofu/GameBoy.jl.git", edit_link=nothing),
+         format = Documenter.HTML(repolink="http://github.com/meltedtofu/GameBoy.jl.git", edit_link=nothing),
          modules = [GameBoy, 
                     GameBoy.Processor, 
                     GameBoy.Carts, 
@@ -46,10 +46,11 @@ makedocs(sitename = "GameBoy.jl",
                     GameBoy.Clock_,
                     GameBoy.MemoryMappingUnit,
                     ],
-         remotes = nothing,
          pages = [
              "Overview" => "index.md",
-             "code.md",
+             "guide.md",
+             "reference.md",
+             "performance.md",
          ])
 
 if "DOCUMENTER_KEY" in keys(ENV)
