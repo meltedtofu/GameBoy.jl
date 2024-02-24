@@ -35,6 +35,8 @@ mutable struct Cartridge
     rom_offset_upper::UInt
     ram_offset::Int
     ramb::UInt8
+    map_enable::Bool
+    map_select::UInt8
 
     function Cartridge(path::String; skipChecksum::Bool=false)
         cartsize = filesize(path)
@@ -81,6 +83,8 @@ mutable struct Cartridge
             0x4000,
             0,
             0,
+            false,
+            0b0000,
            )
     end
 end
@@ -153,9 +157,25 @@ function Component.write!(cart::Cartridge, addr::UInt16, data::UInt8)::Nothing
             cart.ram[(cart.ram_offset | addr & 0x1fff) & (length(cart.ram) - 1)] = data & 0x0f
         end
     elseif cart.mbc == MBC3
-        if 0x2000 <= addr < 0x4000
+        if 0x0000 <= addr < 0x2000
+            cart.map_enable = (data & 0x0f) == 0x0a
+        elseif 0x2000 <= addr < 0x4000
+            if data == 0
+                cart.bank1 = 1
+            else
+                cart.bank1 = data
+            end
+            cart.rom_offset_lower = 0x0000
+            cart.rom_offset_upper = ROM_BANK_SIZE * UInt32(cart.bank1)
         elseif 0x4000 <= addr < 0x6000
+            cart.map_select = data & 0b1111
+            cart.ram_offset = RAM_BANK_SIZE * UInt32(cart.map_select * 0b011)
         elseif 0xa000 <= addr < 0xc000
+            if cart.map_enable
+                if 0x00 <= cart.map_select < 0x04
+                    cart.ram[(cart.ram_offset | addr & 0x1fff) & (length(cart.ram) - 1)] = data
+                end
+            end
         end
     elseif cart.mbc == MBC5
         if 0x0000 <= addr < 0x2000
@@ -279,6 +299,12 @@ function Component.readb(c::Cartridge, addr::UInt16)::UInt8
             end
         elseif c.mbc == MBC2
             if length(c.ram) > 0 && c.ramg
+                @inbounds c.ram[(c.ram_offset | addr & 0x1fff) & (length(c.ram) - 1)]
+            else
+                0xff
+            end
+        elseif c.mbc == MBC3
+            if length(c.ram) > 0
                 @inbounds c.ram[(c.ram_offset | addr & 0x1fff) & (length(c.ram) - 1)]
             else
                 0xff
