@@ -51,6 +51,7 @@ makedocs(sitename = "GameBoy.jl",
              "guide.md",
              "reference.md",
              "performance.md",
+             "accuracy.md",
          ])
 
 if "DOCUMENTER_KEY" in keys(ENV)
