@@ -1,0 +1,8 @@
+name = "ui"
+uuid = "97f4c1ab-ef54-4bc1-9742-180bc3c7f14e"
+authors = ["Melted Tofu <melted@meltedtofu.com>"]
+version = "0.1.0"
+
+[deps]
+GameBoy = "6fb4242f-1e24-4c34-aea5-7820002b36ca"
+SimpleDirectMediaLayer = "98e33af6-2ee5-5afd-9e75-cbc738b767c4"
